@@ -10,26 +10,24 @@ interface TicketInterface is IERC20 {
   /// @param randomNumber The random number to use to select a user.
   /// @return The winner
   function draw(uint256 randomNumber) external view returns (address);
+  function addTicket(address addTicketer,uint256 principal,uint256 addTicketAmount,uint256 maxfee) external;
 
-  function borrow(address borrower,uint256 principal,uint256 borrowAmount,uint256 margin) external;
-
-  function changeBorrow(address borrower,uint256 addMarginAmount,
-  uint256 allBorrowAmount) external returns(uint256,uint256);
+  function changeAddTicket(address addTicketer,uint256 addMaxfeeAmount,
+  uint256 allAddTicketAmount) external returns(uint256,uint256);
 
   function redeem(address from,
     uint256 amount,
     uint256 maximumExitFee) external returns (uint256,uint256,uint256,uint256);
 
-  function borrowRateMantissa() external view returns (uint256);
+  function addTicketRateMantissa() external view returns (uint256);
 
-  function borrowBalanceCurrent(address account) external view returns(uint _principal, uint _interestBorrow,uint256 margin);
+  function addTicketBalanceCurrent(address account) external view returns(uint _principal, uint _incurred_feeAddTicket,uint256 maxfee);
 
-  function accountBorrows(address _borrower) external returns(uint,uint,uint,uint);
+  function accountAddTickets(address _addTicketer) external returns(uint,uint,uint,uint);
 
-  function liquidateCalculateSeizeTokens(address borrower) external returns(uint256);
+  function reduceTicketCalculateSeizeTokens(address addTicketer) external returns(uint256);
 
-  function liquidateBorrow(address from,
-    address controlledToken) external returns(uint256,uint256,uint256,uint256);
+  function reduceAddTicket(address from) external returns(uint256,uint256,uint256,uint256);
 
   function captureAwardBalance(uint256 awardBalance) external returns (uint256);
 

@@ -8,7 +8,7 @@ import "@pooltogether/fixed-point/contracts/FixedPoint.sol";
 
 import "./ControlledToken.sol";
 import "./TicketInterface.sol";
-import "./LiquidationInterface.sol";
+import "./ReduceTicketInterface.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract Ticket is ControlledToken, TicketInterface, Ownable{
@@ -16,15 +16,15 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
 
   bytes32 constant private TREE_KEY = keccak256("PoolTogether/Ticket");
   uint256 constant private MAX_TREE_LEAVES = 5;
-  address public liquidation;
+  address public reduceTicket;
 
   // Ticket-weighted odds
   SortitionSumTreeFactory.SortitionSumTrees internal sortitionSumTrees;
 
   /**
-  * @notice borrow rate that can ever be applied (.0005% / timestamp)
+  * @notice addTicket rate that can ever be applied (.0005% / timestamp)
   */
-  uint public override borrowRateMantissa = 3170979198;
+  uint public override addTicketRateMantissa = 3170979198;
 
   /**
   * @notice Total amount of compensation
@@ -32,77 +32,77 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   uint public totalCompensation;
 
   /**
-  * @notice Total amount of borrows 
+  * @notice Total amount of addTickets 
   */
-  uint public totalBorrows;
+  uint public totalAddTickets;
 
   /**
-  * @notice Interest on the amount borrowed
+  * @notice Incurred_fee on the amount addTicketed
   */
-  uint public totalBorrowsInterest;
+  uint public totalAddTicketsIncurred_fee;
 
   /**
-  * @notice Total amount of borrows margin
+  * @notice Total amount of addTickets maxfee
   */
-  uint public totalsBorrowsMargin;
+  uint public totalsAddTicketsMaxfee;
 
   /**
-  * @notice Timestamp that interest was last accrued at
+  * @notice Timestamp that incurred_fee was last accrued at
   */
   uint public accrualTimestamp;
 
   /**
-  * @notice Accumulator of the total earned interest rate since the opening of the market
+  * @notice Accumulator of the total earned incurred_fee rate since the opening of the market
   */
-  uint public borrowIndex;
+  uint public addTicketIndex;
 
  /**
- * @notice Container for borrow balance information
+ * @notice Container for addTicket balance information
  * @member principal Total balance , after applying the most recent balance-changing action
- * @member interestIndex Global borrowIndex as of the most recent balance-changing action
+ * @member incurred_feeIndex Global addTicketIndex as of the most recent balance-changing action
  */
-  struct BorrowSnapshot {
-        uint borrowAmount;
-        uint interestBorrow;
-        uint interestIndex;
-        uint256 margin;
+  struct AddTicketSnapshot {
+        uint addTicketAmount;
+        uint incurred_feeAddTicket;
+        uint incurred_feeIndex;
+        uint256 maxfee;
   }
 
-  mapping(address => BorrowSnapshot) public override accountBorrows;
+  mapping(address => AddTicketSnapshot) public override accountAddTickets;
 
-  /// @dev Emitted when Borrow 
-  event Borrow(address borrower,uint256 principal,uint256 borrowAmount,uint256 margin);
+  /// @dev Emitted when AddTicket 
+  event AddTicket(address addTicketer,uint256 principal,uint256 addTicketAmount,uint256 maxfee);
 
   /// @dev Emitted when Reddem
-  event Reddem(uint256 _redeemTokens,uint256 _redeemBorrowAmount,uint256 _redeemBmargin,bool isReddemAll);
+  event Reddem(uint256 _redeemTokens,uint256 _redeemAddTicketAmount,uint256 _redeemBmaxfee,bool isReddemAll);
 
-  /// @dev Emitted Burn the user's margin
-  event ExitFeeBurnMargin(uint256 burnMargin);
+  /// @dev Emitted Burn the user's maxfee
+  event ExitFeeBurnMaxfee(uint256 burnMaxfee);
 
-  event ChangeBorrow(uint256 allBorrowAmount,uint256 addMarginAmount,uint256 currrentMargin);
+  event ChangeAddTicket(uint256 allAddTicketAmount,uint256 addMaxfeeAmount,uint256 currrentMaxfee);
 
-  /// @dev Emitted when Liquidate Borrow
-  event LiquidateBorrowFresh(
+  /// @dev Emitted when ReduceTicket AddTicket
+  event ReduceTicketAddTicketFresh(
     address controlledToken,
-    address borrower,
-    uint256 borrowAmount,
-    uint256 interestBorrow,
-    uint256 margin
+    address addTicketer,
+    uint256 addTicketAmount,
+    uint256 incurred_feeAddTicket,
+    uint256 maxfee
    );
 
-  /// @dev Emitted when Liquidate Borrow
-  event LiquidateBorrowComplete(
-    address borrower,
+  /// @dev Emitted when ReduceTicket AddTicket
+  event ReduceTicketAddTicketComplete(
+    address addTicketer,
     uint256 compensationTokens
    );
   
-  event ExitFeeBurnMarginRiskValue(uint256 _borrowAmount,uint256 _interestBorrow,uint256 _remainingMargin,uint256 riskValue);
+  event ExitFeeBurnMaxfeeRiskValue(uint256 _addTicketAmount,uint256 _incurred_feeAddTicket,uint256 _remainingMaxfee,uint256 riskValue);
   /// @dev Emitted Calculate the rewards of the pool
   event CaptureAwardBalance(
     uint256 originalAwardBalance,
     uint256 awardBalance,  
-    uint256 totalsBorrowsMargin,
-    uint256 totalBorrowsInterest,
+    uint256 totalsAddTicketsMaxfee,
+    uint256 totalAddTicketsIncurred_fee,
     uint256 totalCompensation
   );
   
@@ -123,13 +123,13 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
     accrualTimestamp  = _currentTime();
   }
 
-  function setBorrowRateMantissa(uint256 _borrowRateMantissa) external onlyOwner(){
-    accrueInterest();
-    borrowRateMantissa = _borrowRateMantissa;
+  function setAddTicketRateMantissa(uint256 _addTicketRateMantissa) external onlyOwner(){
+    accrueIncurred_fee();
+    addTicketRateMantissa = _addTicketRateMantissa;
   }
 
-  function setLiquidation(address _liquidation) external onlyOwner() {
-    liquidation = _liquidation;
+  function setReduceTicket(address _reduceTicket) external onlyOwner() {
+    reduceTicket = _reduceTicket;
   }
 
   /// @notice Returns the user's chance of winning.
@@ -140,12 +140,12 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
 
   /// @notice Take the total share, the total share in the first stage is the total votes
   function getAllShares() external  override view returns (uint256) {
-    return totalSupply().add(totalBorrows);
+    return totalSupply().add(totalAddTickets);
   }
 
   /// @notice Get the user assets, the first stage user assets is the user balance
   function getUserAssets(address user) external override view returns (uint256) {
-    return balanceOf(user).add(accountBorrows[user].borrowAmount);
+    return balanceOf(user).add(accountAddTickets[user].addTicketAmount);
   }
 
   /// @notice Selects a user using a random number.  The random number will be uniformly bounded to the ticket totalSupply.
@@ -178,7 +178,7 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   * - `sender` must have a balance of at least `amount`.
   */  
   function _transfer(address sender, address recipient, uint256 amount) internal virtual override {
-    require(accountBorrows[sender].borrowAmount == 0,"ERC20: transfer from the existence of borrow amount");
+    require(accountAddTickets[sender].addTicketAmount == 0,"ERC20: transfer from the existence of addTicket amount");
     super._transfer(sender, recipient, amount);
   }
   
@@ -198,94 +198,111 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
 
     if (from != address(0)) {
       uint256 fromBalance = balanceOf(from).sub(amount);
-      uint256 _fromBalance= fromBalance.add(accountBorrows[from].borrowAmount);
+      uint256 _fromBalance= fromBalance.add(accountAddTickets[from].addTicketAmount);
       sortitionSumTrees.set(TREE_KEY, _fromBalance, bytes32(uint256(from)));
     }
 
     if (to != address(0)) {
       uint256 toBalance = balanceOf(to).add(amount);
-      uint256 _toBalance = toBalance.add(accountBorrows[to].borrowAmount);
+      uint256 _toBalance = toBalance.add(accountAddTickets[to].addTicketAmount);
       sortitionSumTrees.set(TREE_KEY, _toBalance, bytes32(uint256(to)));
     }
   }
 
   /**
-  * @notice Applies accrued interest to total borrows 6
-  * @dev This calculates interest accrued from the last checkpointed time
+  * @notice Applies accrued incurred_fee to total addTickets 6
+  * @dev This calculates incurred_fee accrued from the last checkpointed time
   *  up to the current time and writes new checkpoint to storage.
   */
-  function accrueInterest() public returns (uint256) { 
+  function accrueIncurred_fee() public returns (uint256) { 
     uint256 currentTimestamp = _currentTime();
     if(currentTimestamp == accrualTimestamp) return 0;
     uint256 secondsDelta = currentTimestamp.sub(accrualTimestamp);
-    uint256 interestAccumulated;
-    if(totalBorrows != 0){
-      uint256 simpleInterestFactor = secondsDelta.mul(borrowRateMantissa);
-      interestAccumulated = FixedPoint.multiplyUintByMantissa(simpleInterestFactor,totalBorrows);
-      uint256 indexDeltaMantissa = FixedPoint.calculateMantissa(interestAccumulated,totalBorrows);
-      borrowIndex = borrowIndex.add(indexDeltaMantissa);
-      totalBorrowsInterest = totalBorrowsInterest.add(interestAccumulated);
+    uint256 incurred_feeAccumulated;
+    if(totalAddTickets != 0){
+      uint256 simpleIncurred_feeFactor = secondsDelta.mul(addTicketRateMantissa);
+      incurred_feeAccumulated = FixedPoint.multiplyUintByMantissa(simpleIncurred_feeFactor,totalAddTickets);
+      uint256 indexDeltaMantissa = FixedPoint.calculateMantissa(incurred_feeAccumulated,totalAddTickets);
+      addTicketIndex = addTicketIndex.add(indexDeltaMantissa);
+      totalAddTicketsIncurred_fee = totalAddTicketsIncurred_fee.add(incurred_feeAccumulated);
     }
     accrualTimestamp = currentTimestamp;
-    return interestAccumulated;
+    return incurred_feeAccumulated;
   }
 
   /**
-   * @notice Sender borrows assets from the protocol to their own address
+   * @notice Sender addTickets assets from the protocol to their own address
    * @param _address The address
    * @param _amount The amount of the asset 
    * 
    */
-  function fresh(address _address,uint _amount,uint _margin,bool isBorrow) internal returns (uint256) {
-    BorrowSnapshot memory borrowSnapshot = accountBorrows[_address];
-    uint256 deltaBorrowIndexMantissa = uint256(borrowIndex).sub(borrowSnapshot.interestIndex);
+  function fresh(address _address,uint _amount,uint _maxfee,bool isAddTicket) internal returns (uint256) {
+    AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[_address];
+    uint256 deltaAddTicketIndexMantissa = uint256(addTicketIndex).sub(addTicketSnapshot.incurred_feeIndex);
 
-    //Calculate the borrowings incurred
-    uint256 newBorrows = FixedPoint.multiplyUintByMantissa(borrowSnapshot.borrowAmount, deltaBorrowIndexMantissa);
+    //Calculate the addTicketings incurred
+    uint256 newAddTickets = FixedPoint.multiplyUintByMantissa(addTicketSnapshot.addTicketAmount, deltaAddTicketIndexMantissa);
 
-    if(isBorrow){
-      accountBorrows[_address].borrowAmount = borrowSnapshot.borrowAmount.add(_amount);
+    if(isAddTicket){
+      accountAddTickets[_address].addTicketAmount = addTicketSnapshot.addTicketAmount.add(_amount);
     }
-    accountBorrows[_address].interestBorrow = uint256(borrowSnapshot.interestBorrow).add(newBorrows);
-    accountBorrows[_address].interestIndex = borrowIndex; 
-    accountBorrows[_address].margin = uint256(borrowSnapshot.margin).add(_margin);
-    return newBorrows;
+    accountAddTickets[_address].incurred_feeAddTicket = uint256(addTicketSnapshot.incurred_feeAddTicket).add(newAddTickets);
+    accountAddTickets[_address].incurred_feeIndex = addTicketIndex; 
+    accountAddTickets[_address].maxfee = uint256(addTicketSnapshot.maxfee).add(_maxfee);
+    return newAddTickets;
   
   }
 
   /**
-   * @notice Sender borrows assets from the protocol to their own address
-   * @param borrowAmount The amount of the underlying asset to borrow
+   * @notice Increase the user's MaxFee
+   * @param addTicketer The address to increase maxFee
    * 
    */
-  function borrow(address borrower,uint256 principal,uint256 borrowAmount,uint256 margin) 
-  override external onlyController{
-    accrueInterest();
-    if(borrowAmount != 0 || accountBorrows[borrower].borrowAmount != 0){ 
-      boorwInternal(borrower,principal,borrowAmount,margin);
-    }
+  function addMaxFee(address addTicketer,uint256 maxFeeAmount) internal {
+    AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[addTicketer];
+    accountAddTickets[addTicketer].maxfee = addTicketSnapshot.maxfee.add(maxFeeAmount);
+    totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.add(maxFeeAmount);
+
   }
 
   /**
-   * @notice Sender borrows assets from the protocol to their own address
-   * @param borrowAmount The amount of the underlying asset to borrow
+   * @notice Sender addTickets assets from the protocol to their own address
+   * @param addTicketAmount The amount of the underlying asset to addTicket
    * 
    */
-  function boorwInternal(address borrower,uint256 principal,uint256 borrowAmount,uint256 margin) internal{
-    BorrowSnapshot memory borrowSnapshot = accountBorrows[borrower];
-    uint256 deltaBorrowIndexMantissa = uint256(borrowIndex).sub(borrowSnapshot.interestIndex);
-    //Calculate the borrowings incurred
-    uint256 newBorrows = FixedPoint.multiplyUintByMantissa(borrowSnapshot.borrowAmount, deltaBorrowIndexMantissa);
-    uint256 _borrowAmount = borrowSnapshot.borrowAmount.add(borrowAmount);
-    uint256 _interestBorrow = uint256(borrowSnapshot.interestBorrow).add(newBorrows);
-    uint256 _margin = uint256(borrowSnapshot.margin).add(margin);
-    LiquidationInterface(liquidation).borrowAllowed(address(this),borrower,principal,borrowAmount,margin,
-    _borrowAmount,_interestBorrow,_margin,borrowRateMantissa);
-    fresh(borrower,borrowAmount,margin,true);
-    totalsBorrowsMargin = totalsBorrowsMargin.add(margin);
-    totalBorrows = totalBorrows.add(borrowAmount);
+  function addTicket(address addTicketer,uint256 principal,uint256 addTicketAmount,uint256 maxfee) 
+  override external onlyController{
+    if(principal == 0 && addTicketAmount == 0 && maxfee != 0){
+      addMaxFee(addTicketer,maxfee);
+    }else{
+      accrueIncurred_fee();
+      if(addTicketAmount != 0 || accountAddTickets[addTicketer].addTicketAmount != 0){ 
+        addTicketInternal(addTicketer,principal,addTicketAmount,maxfee);
+      }
+    }
 
-    emit Borrow(borrower,principal,borrowAmount,margin);
+  }
+
+  /**
+   * @notice Sender addTickets assets from the protocol to their own address
+   * @param addTicketAmount The amount of the underlying asset to addTicket
+   * 
+   */
+  function addTicketInternal(address addTicketer,uint256 principal,uint256 addTicketAmount,uint256 maxfee) internal{
+    AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[addTicketer];
+    uint256 deltaAddTicketIndexMantissa = uint256(addTicketIndex).sub(addTicketSnapshot.incurred_feeIndex);
+    //Calculate the addTicketings incurred
+    uint256 newAddTickets = FixedPoint.multiplyUintByMantissa(addTicketSnapshot.addTicketAmount, deltaAddTicketIndexMantissa);
+    uint256 _addTicketAmount = addTicketSnapshot.addTicketAmount.add(addTicketAmount);
+    uint256 _incurred_feeAddTicket = uint256(addTicketSnapshot.incurred_feeAddTicket).add(newAddTickets);
+    uint256 _maxfee = uint256(addTicketSnapshot.maxfee).add(maxfee);
+    ReduceTicketInterface(reduceTicket).addTicketAllowed(address(this),addTicketer,principal,addTicketAmount,maxfee,
+    _addTicketAmount,_incurred_feeAddTicket,_maxfee,addTicketRateMantissa);
+    fresh(addTicketer,addTicketAmount,maxfee,true);
+    totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.add(maxfee);
+    totalAddTickets = totalAddTickets.add(addTicketAmount);
+
+    emit AddTicket(addTicketer,principal,addTicketAmount,maxfee);
   }
   
   /**
@@ -300,27 +317,27 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
     uint256 burnedCredit;
     address _from = from;
     uint256 _amount = amount;
-    (uint256 _redeemTokens,uint256 _redeemBorrowAmount,uint256 _redeeMargin,bool isReddemAll) = redeemInternal(_from, _amount);
-    uint256 _allAmount = _redeemTokens.add(_redeemBorrowAmount);
+    (uint256 _redeemTokens,uint256 _redeemAddTicketAmount,uint256 _redeemMaxfee,bool isReddemAll,bool _isMoreThanRiskValue) = redeemInternal(_from, _amount);
+    uint256 _allAmount = _redeemTokens.add(_redeemAddTicketAmount);
 
-    (exitFee, burnedCredit) = LiquidationInterface(liquidation).calculateEarlyExitFee(_from, address(this), _allAmount);
+    (exitFee, burnedCredit) = ReduceTicketInterface(reduceTicket).calculateEarlyExitFee(_from, address(this), _allAmount);
     require(exitFee <= maximumExitFee, "PrizePool/exit-fee-exceeds-user-maximum");
-    redeemComplete(_from,_redeemBorrowAmount,isReddemAll);
-    
+    if(!_isMoreThanRiskValue && accountAddTickets[_from].addTicketAmount != 0){
+       redeemComplete(_from,_redeemAddTicketAmount,isReddemAll);
+    }
     uint _exitFee;
-    if(isReddemAll ||_redeemBorrowAmount == 0){
+    if(_redeemAddTicketAmount == 0){
        _exitFee = exitFee;
     }else{
-      uint256 _allTokens = _redeemTokens.add(_redeemBorrowAmount);
+      uint256 _allTokens = _redeemTokens.add(_redeemAddTicketAmount);
       _exitFee = exitFee.mul(_redeemTokens).div(_allTokens);
-      uint256 _burnMargin = exitFee.sub(_exitFee);
-      exitFeeBurnMargin(_from, _burnMargin);
+      uint256 _burnMaxfee = exitFee.sub(_exitFee);
+      exitFeeBurnMaxfee(_from, _burnMaxfee);
     }
     // redeem the tickets less the fee
-    uint256 amountLessFee = _amount.sub(_exitFee).add(_redeeMargin);
-    return (amountLessFee,_redeeMargin,exitFee,burnedCredit);
+    uint256 amountLessFee = _amount.sub(_exitFee).add(_redeemMaxfee);
+    return (amountLessFee,_redeemMaxfee,exitFee,burnedCredit);
   }
-
 
   /**
   * @notice Sender redeems ticket in exchange for the asset
@@ -328,75 +345,91 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   * @param redeemTokens redeemTokens The number of cTokens to redeem
   *
   */
-  function redeemInternal(address redeemAddress,uint256 redeemTokens) internal returns(uint256,uint256,uint256,bool){
-      accrueInterest();
+function redeemInternal(address redeemAddress,uint256 redeemTokens) internal returns(uint256,uint256,uint256,bool,bool){
+      accrueIncurred_fee();
       uint256 _originalBalance = balanceOf(redeemAddress);
       uint256 _balance = _originalBalance.sub(redeemTokens);
-      if(accountBorrows[redeemAddress].borrowAmount == 0){
+      if(accountAddTickets[redeemAddress].addTicketAmount == 0){
          emit Reddem(redeemTokens,0,0,_balance == 0);
-         return (redeemTokens,0,0,_balance == 0);
+         return (redeemTokens,0,0,_balance == 0,false);
       }
       fresh(redeemAddress,0,0,false);
+
       address _redeem = redeemAddress;
       uint256 _redeemTokens;
-      uint256 _redeemBorrowAmount;
-      uint256 _redeemBmargin;
-      uint256 _borrowAmountNew;
-      uint256 _riskValue = FixedPoint.multiplyUintByMantissa( LiquidationInterface(liquidation).calculateCurrentRiskValue(address(this),_redeem,
-      accountBorrows[_redeem].borrowAmount,accountBorrows[_redeem].interestBorrow,accountBorrows[_redeem].margin),1);
-      if(_riskValue != 0){
-        uint256 exitFee =  LiquidationInterface(liquidation).getExitFee(address(this), _redeem, 0, accountBorrows[_redeem].borrowAmount);
-        uint256 _payAmount = accountBorrows[_redeem].interestBorrow.add(exitFee);  
-        uint256 compensationTokens = 0;
-        
-        if(_payAmount > accountBorrows[_redeem].margin){
-           compensationTokens = _payAmount.sub(accountBorrows[_redeem].margin);
-           _redeemBmargin = 0;
+      uint256 _redeemAddTicketAmount;
+      uint256 _redeemMaxfee;
+      uint256 _addTicketAmountNew;
+ 
+      uint256 _riskValue;
+      bool _isMoreThanRiskValue = false;
+      if(_balance == 0){
+        _riskValue = FixedPoint.multiplyUintByMantissa(ReduceTicketInterface(reduceTicket).calculateCurrentRiskValue(address(this),_redeem,
+        accountAddTickets[_redeem].addTicketAmount,accountAddTickets[_redeem].incurred_feeAddTicket,accountAddTickets[_redeem].maxfee),1);
+        uint256 exitFee =  ReduceTicketInterface(reduceTicket).getExitFee(address(this), _redeem, 0, accountAddTickets[_redeem].addTicketAmount);
+        if(_riskValue != 0){
+          _redeemMaxfee = redeemMoreThanRiskInternal(_redeem);
+          _isMoreThanRiskValue = true;
         }else{
-           _redeemBmargin = accountBorrows[_redeem].margin.sub(_payAmount);
+          _redeemMaxfee = accountAddTickets[_redeem].maxfee.sub(accountAddTickets[_redeem].incurred_feeAddTicket).sub(exitFee);
         }
-        liquidateComplete(_redeem,compensationTokens);
-        _redeemBorrowAmount = 0;   
+        _redeemAddTicketAmount = 0;
+       
       }else{
-        if(_balance == 0){
-          uint256 _margin = accountBorrows[_redeem].margin;
-          uint256 _interestBorrow = accountBorrows[_redeem].interestBorrow;
-          if(_margin >= _interestBorrow){
-            uint256 remainingMargin = _margin.sub(_interestBorrow);
-            _redeemBmargin = remainingMargin;
-          }else{
-            uint256 _compensationMargin = _interestBorrow.sub(_margin);
-            totalCompensation = totalCompensation.add(_compensationMargin); 
-          }
-          totalBorrows = totalBorrows.sub(accountBorrows[_redeem].borrowAmount);
-         _redeemBorrowAmount = accountBorrows[_redeem].borrowAmount;
-        }else{
-          uint256 _borrowAmount = accountBorrows[_redeem].borrowAmount;
-         _borrowAmountNew = _borrowAmount.mul(_balance).div(_originalBalance);
-         _redeemBorrowAmount = accountBorrows[_redeem].borrowAmount.sub(_borrowAmountNew);
-         }
+        _addTicketAmountNew = accountAddTickets[_redeem].addTicketAmount.mul(_balance).div(_originalBalance);
+        _redeemAddTicketAmount = accountAddTickets[_redeem].addTicketAmount.sub(_addTicketAmountNew);
         
+        _riskValue = FixedPoint.multiplyUintByMantissa(ReduceTicketInterface(reduceTicket).calculateCurrentRiskValue(address(this),_redeem,
+        _addTicketAmountNew,accountAddTickets[_redeem].incurred_feeAddTicket,accountAddTickets[_redeem].maxfee),1);
+       if(_riskValue != 0){
+          _redeemMaxfee = redeemMoreThanRiskInternal(_redeem);
+          _redeemAddTicketAmount = 0;
+          _isMoreThanRiskValue = true;
+       }
+
       }
      _redeemTokens = redeemTokens; 
-     emit Reddem(_redeemTokens,_redeemBorrowAmount,_redeemBmargin,_balance == 0);
-     return (_redeemTokens,_redeemBorrowAmount,_redeemBmargin,_balance == 0);
-
+     emit Reddem(_redeemTokens,_redeemAddTicketAmount,_redeemMaxfee,_balance == 0);
+     return (_redeemTokens,_redeemAddTicketAmount,_redeemMaxfee,_balance == 0,_isMoreThanRiskValue);
+}
+  
+  /**
+  * @notice It was above the value at risk when it was redeemed
+  * @param _redeem The address of the redeem
+  *
+  */
+  function redeemMoreThanRiskInternal(address _redeem) internal returns( uint256 _redeemMaxfee){
+          uint256 exitFee = ReduceTicketInterface(reduceTicket).getExitFee(address(this), _redeem, 0, accountAddTickets[_redeem].addTicketAmount);
+          uint256 _payAmount = accountAddTickets[_redeem].incurred_feeAddTicket.add(exitFee).add(reduceTicketCalculateSeizeTokens(_redeem));
+          uint256 compensationTokens = 0;
+          if(accountAddTickets[_redeem].maxfee > _payAmount){
+             _redeemMaxfee = accountAddTickets[_redeem].maxfee.sub(_payAmount).add(reduceTicketCalculateSeizeTokens(_redeem));
+          }else{
+             compensationTokens = _payAmount.sub(accountAddTickets[_redeem].maxfee);
+          }
+          reduceTicketComplete(_redeem,compensationTokens);
+          return _redeemMaxfee;
+  
   }
 
   /**
   * @notice Sender redeems ticket in exchange for the asset
   *
   */
-  function redeemComplete(address _redeem,uint256 _redeemBorrowAmount,bool isReddemAll) internal{
+  function redeemComplete(address _redeem,uint256 _redeemAddTicketAmount,bool isReddemAll) internal{
     if(isReddemAll){
-        accountBorrows[_redeem].borrowAmount = 0;
-        accountBorrows[_redeem].interestBorrow = 0;
-        totalsBorrowsMargin = totalsBorrowsMargin.sub(accountBorrows[_redeem].margin);
-        accountBorrows[_redeem].margin = 0;
+        totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(accountAddTickets[_redeem].maxfee);
+        totalAddTickets = totalAddTickets.sub(accountAddTickets[_redeem].addTicketAmount);
+
+        accountAddTickets[_redeem].addTicketAmount = 0;
+        accountAddTickets[_redeem].incurred_feeAddTicket = 0;
+        accountAddTickets[_redeem].maxfee = 0;
+
+
     }else{
-        uint256 _borrowAmountNew = accountBorrows[_redeem].borrowAmount.sub(_redeemBorrowAmount);
-        accountBorrows[_redeem].borrowAmount = _borrowAmountNew;
-        totalBorrows = totalBorrows.sub(_redeemBorrowAmount);
+        uint256 _addTicketAmountNew = accountAddTickets[_redeem].addTicketAmount.sub(_redeemAddTicketAmount);
+        accountAddTickets[_redeem].addTicketAmount = _addTicketAmountNew;
+        totalAddTickets = totalAddTickets.sub(_redeemAddTicketAmount);
     }
 
   }
@@ -407,163 +440,160 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   }
 
   /***
-   * @notice Burn the user's margin
+   * @notice Burn the user's maxfee
    *
    */
-  function exitFeeBurnMargin(address account,uint256 _burnAmount) internal {
+  function exitFeeBurnMaxfee(address account,uint256 _burnAmount) internal {
       if(_burnAmount != 0){
-        uint256 _margin = accountBorrows[account].margin;
-        uint256 _remainingMargin = _margin.sub(_burnAmount);
-        totalsBorrowsMargin = totalsBorrowsMargin.sub(_burnAmount);
-        uint256 _borrowAmount = accountBorrows[account].borrowAmount;
-        uint256 _interestBorrow = accountBorrows[account].interestBorrow;
-        uint256 _riskValue = FixedPoint.multiplyUintByMantissa(LiquidationInterface(liquidation).calculateCurrentRiskValue(address(this),
-        account,_borrowAmount, _interestBorrow,_remainingMargin),1);
-        emit ExitFeeBurnMarginRiskValue(_borrowAmount,_interestBorrow,_remainingMargin,_riskValue);
-        require(_riskValue == 0,"Ticket-exitFeeBurnMargin/excess value at risk");
-        accountBorrows[account].margin = _remainingMargin;
+        uint256 _remainingMaxfee = accountAddTickets[account].maxfee.sub(_burnAmount);
+        totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(_burnAmount);
+        uint256 _addTicketAmount = accountAddTickets[account].addTicketAmount;
+        uint256 _incurred_feeAddTicket = accountAddTickets[account].incurred_feeAddTicket;
+        uint256 _riskValue = FixedPoint.multiplyUintByMantissa(ReduceTicketInterface(reduceTicket).calculateCurrentRiskValue(address(this),
+        account,_addTicketAmount, _incurred_feeAddTicket,_remainingMaxfee),1);
+        emit ExitFeeBurnMaxfeeRiskValue(_addTicketAmount,_incurred_feeAddTicket,_remainingMaxfee,_riskValue);
+        require(_riskValue == 0,"Ticket-exitFeeBurnMaxfee/excess value at risk");
+        accountAddTickets[account].maxfee = _remainingMaxfee;
       }
-      emit ExitFeeBurnMargin(_burnAmount);
+      emit ExitFeeBurnMaxfee(_burnAmount);
   }
 
   /**
-   * @notice Change the amount borrowed
+   * @notice Change the amount addTicketed
    *
    */
-  function changeBorrow(address borrower,uint256 addMarginAmount,
-  uint256 allBorrowAmount) external override onlyController returns(uint256,uint256){
-     accrueInterest();
-     fresh(borrower,0,0,false);
-     BorrowSnapshot memory borrowSnapshot = accountBorrows[borrower];
-     uint256 _principal = balanceOf(borrower);
-     uint256 _interestBorrow = borrowSnapshot.interestBorrow;
-     uint256 _margin = borrowSnapshot.margin;
-     uint256 _currentBorrowAmount = borrowSnapshot.borrowAmount;
-     uint256 _addBorrowAmount;
-     if(allBorrowAmount > _currentBorrowAmount){
-       _addBorrowAmount = allBorrowAmount.sub(_currentBorrowAmount);
+  function changeAddTicket(address addTicketer,uint256 addMaxfeeAmount,
+  uint256 allAddTicketAmount) external override onlyController returns(uint256,uint256){
+     accrueIncurred_fee();
+     fresh(addTicketer,0,0,false);
+     AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[addTicketer];
+     uint256 _principal = balanceOf(addTicketer);
+     uint256 _incurred_feeAddTicket = addTicketSnapshot.incurred_feeAddTicket;
+     uint256 _maxfee = addTicketSnapshot.maxfee;
+     uint256 _currentAddTicketAmount = addTicketSnapshot.addTicketAmount;
+     uint256 _addAddTicketAmount;
+     if(allAddTicketAmount > _currentAddTicketAmount){
+       _addAddTicketAmount = allAddTicketAmount.sub(_currentAddTicketAmount);
      }else{
-       _addBorrowAmount = 0;
+       _addAddTicketAmount = 0;
      }
-     _margin = _margin.add(addMarginAmount);
+     _maxfee = _maxfee.add(addMaxfeeAmount);
 
-     uint256 reduceBorrowAmount;
-     if(_currentBorrowAmount > allBorrowAmount){
-       reduceBorrowAmount = _currentBorrowAmount.sub(allBorrowAmount);
+     uint256 reduceAddTicketAmount;
+     if(_currentAddTicketAmount > allAddTicketAmount){
+       reduceAddTicketAmount = _currentAddTicketAmount.sub(allAddTicketAmount);
      }else{
-       reduceBorrowAmount = 0;
+       reduceAddTicketAmount = 0;
      }
      
-     LiquidationInterface(liquidation).changeBorrowAllowed(address(this),borrower,
-     _principal,_addBorrowAmount,allBorrowAmount,_interestBorrow,_margin,borrowRateMantissa);
+     ReduceTicketInterface(reduceTicket).changeAddTicketAllowed(address(this),addTicketer,
+     _principal,_addAddTicketAmount,allAddTicketAmount,_incurred_feeAddTicket,_maxfee,addTicketRateMantissa);
       
       uint256 exitFee;
       uint256 burnedCredit;
-     if(reduceBorrowAmount > 0){
-        (exitFee, burnedCredit) =  LiquidationInterface(liquidation).calculateEarlyExitFee(borrower, address(this), reduceBorrowAmount);
-        changeBorrowComplete(borrower,addMarginAmount,allBorrowAmount);
-        exitFeeBurnMargin(borrower, exitFee);
+     if(reduceAddTicketAmount > 0){
+        (exitFee, burnedCredit) =  ReduceTicketInterface(reduceTicket).calculateEarlyExitFee(addTicketer, address(this), reduceAddTicketAmount);
+        changeAddTicketComplete(addTicketer,addMaxfeeAmount,allAddTicketAmount);
+        exitFeeBurnMaxfee(addTicketer, exitFee);
       }else{
-        changeBorrowComplete(borrower,addMarginAmount,allBorrowAmount);
+        changeAddTicketComplete(addTicketer,addMaxfeeAmount,allAddTicketAmount);
      }
 
-     emit ChangeBorrow(allBorrowAmount,addMarginAmount,_margin);
+     emit ChangeAddTicket(allAddTicketAmount,addMaxfeeAmount,_maxfee);
      return (exitFee,burnedCredit);
      
   }
 
-  function changeBorrowComplete(address borrower,uint256 addMarginAmount,uint256 allBorrowAmount) internal {
-     BorrowSnapshot memory borrowSnapshot = accountBorrows[borrower];
-     uint256 _margin = borrowSnapshot.margin;
-     uint256 _borrowAmount = borrowSnapshot.borrowAmount;
-     if(allBorrowAmount > _borrowAmount){
-        totalBorrows = totalBorrows.add(allBorrowAmount.sub(_borrowAmount));
+  function changeAddTicketComplete(address addTicketer,uint256 addMaxfeeAmount,uint256 allAddTicketAmount) internal {
+     AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[addTicketer];
+     uint256 _maxfee = addTicketSnapshot.maxfee;
+     uint256 _addTicketAmount = addTicketSnapshot.addTicketAmount;
+     if(allAddTicketAmount > _addTicketAmount){
+        totalAddTickets = totalAddTickets.add(allAddTicketAmount.sub(_addTicketAmount));
      }else{
-        totalBorrows = totalBorrows.sub(_borrowAmount.sub(allBorrowAmount));
+        totalAddTickets = totalAddTickets.sub(_addTicketAmount.sub(allAddTicketAmount));
      }
-     _margin = _margin.add(addMarginAmount);
-     totalsBorrowsMargin = totalsBorrowsMargin.add(addMarginAmount);
-     accountBorrows[borrower].borrowAmount = allBorrowAmount;
-     accountBorrows[borrower].margin = _margin;
-
-     uint256 balance = balanceOf(borrower);
-     uint256 _toBalance = balance.add(accountBorrows[borrower].borrowAmount);
-     sortitionSumTrees.set(TREE_KEY, _toBalance, bytes32(uint256(borrower)));
+     _maxfee = _maxfee.add(addMaxfeeAmount);
+     totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.add(addMaxfeeAmount);
+     accountAddTickets[addTicketer].addTicketAmount = allAddTicketAmount;
+     accountAddTickets[addTicketer].maxfee = _maxfee;
+     uint256 _toBalance = balanceOf(addTicketer).add(accountAddTickets[addTicketer].addTicketAmount);
+     sortitionSumTrees.set(TREE_KEY, _toBalance, bytes32(uint256(addTicketer)));
 
   }
   
   /**
-  * @notice The liquidator liquidates the borrower
+  * @notice The liquidator reduceTickets the addTicketer
   *
   */
-  function liquidateBorrow(address from,
-    address controlledToken) external override onlyController returns(uint256,uint256,uint256,uint256){
-     liquidateBorrowFresh(from);
-    (uint256 borrowAmount,uint256 _interestBorrow,,uint256 _margin) = TicketInterface(controlledToken).accountBorrows(from);
-    uint256 _seizeToken = TicketInterface(controlledToken).liquidateCalculateSeizeTokens(from); 
-    (uint256 exitFee, uint256 burnedCredit) = LiquidationInterface(liquidation).calculateEarlyExitFee(from, controlledToken, borrowAmount);
-    uint256 _payAmount = _seizeToken.add(_interestBorrow).add(exitFee);  
+  function reduceAddTicket(address from) external override onlyController returns(uint256,uint256,uint256,uint256){
+     reduceAddTicketFresh(from);
+    (uint256 addTicketAmount,uint256 _incurred_feeAddTicket,,uint256 _maxfee) = TicketInterface(address(this)).accountAddTickets(from);
+    uint256 _seizeToken = reduceTicketCalculateSeizeTokens(from); 
+    (uint256 exitFee, uint256 burnedCredit) = ReduceTicketInterface(reduceTicket).calculateEarlyExitFee(from, address(this), addTicketAmount);
+    uint256 _payAmount = _seizeToken.add(_incurred_feeAddTicket).add(exitFee);  
     uint256 seizeToken;
-    uint256 remainingMargin;
-    if(_margin >= _payAmount){
+    uint256 remainingMaxfee;
+    if(_maxfee >= _payAmount){
        seizeToken = _seizeToken;
-       remainingMargin = _margin.sub(_payAmount);
-       liquidateBorrowComplete(from,0);
+       remainingMaxfee = _maxfee.sub(_payAmount);
+       reduceAddTicketComplete(from,0);
 
     }else{
-      if(_margin > _seizeToken){
+      if(_maxfee > _seizeToken){
         seizeToken = _seizeToken;
       }
-      liquidateBorrowComplete(from,_payAmount.sub(_margin));
+      reduceAddTicketComplete(from,_payAmount.sub(_maxfee));
     }
-    return (seizeToken,remainingMargin,exitFee,burnedCredit);
+    return (seizeToken,remainingMaxfee,exitFee,burnedCredit);
 
   }
 
   /**
-  * @notice The liquidator liquidates the borrower
-  * @param borrower The address of the borrow
+  * @notice The liquidator reduceTickets the addTicketer
+  * @param addTicketer The address of the addTicket
   *
   */
-  function liquidateBorrowFresh(address borrower) internal {
-    require(LiquidationInterface(liquidation).liquidateBorrowAllowed(address(this), borrower) == true,"Ticket-liquidateBorrow/Borrower are not allowed to liquidate");
-    accrueInterest();
-    fresh(borrower,0,0,false);
-    emit LiquidateBorrowFresh(address(this),borrower, accountBorrows[borrower].borrowAmount,
-    accountBorrows[borrower].interestBorrow,accountBorrows[borrower].margin);
-
-  }
-  
-  /**
-  * @notice The liquidator liquidates the borrower
-  * @param borrower The borrower's address
-  * @param compensationTokens The borrower's compensation amount
-  *
-  */
-  function liquidateBorrowComplete(address borrower,uint256 compensationTokens) internal {
-     liquidateComplete(borrower,compensationTokens);
-
-     uint256 balance = balanceOf(borrower);
-     sortitionSumTrees.set(TREE_KEY, balance, bytes32(uint256(borrower)));
-     emit LiquidateBorrowComplete(borrower,compensationTokens);
+  function reduceAddTicketFresh(address addTicketer) internal {
+    require(ReduceTicketInterface(reduceTicket).reduceAddTicketAllowed(address(this), addTicketer) == true,"Ticket-reduceAddTicket/AddTicketer are not allowed to reduceTicket");
+    accrueIncurred_fee();
+    fresh(addTicketer,0,0,false);
+    emit ReduceTicketAddTicketFresh(address(this),addTicketer, accountAddTickets[addTicketer].addTicketAmount,
+    accountAddTickets[addTicketer].incurred_feeAddTicket,accountAddTickets[addTicketer].maxfee);
 
   }
   
   /**
-  * @notice Initialize the borrower's clearing data
-  * @param  borrower  The borrower's address
-  * @param  compensationTokens The borrower's compensation amount
+  * @notice The liquidator reduceTickets the addTicketer
+  * @param addTicketer The addTicketer's address
+  * @param compensationTokens The addTicketer's compensation amount
   *
   */
-  function liquidateComplete(address borrower,uint256 compensationTokens) internal{
-    BorrowSnapshot memory borrowSnapshot = accountBorrows[borrower];
-    totalsBorrowsMargin = totalsBorrowsMargin.sub(borrowSnapshot.margin);
-    totalBorrows = totalBorrows.sub(borrowSnapshot.borrowAmount);
-    accountBorrows[borrower] = BorrowSnapshot({
-      borrowAmount: 0,
-      interestBorrow: 0,
-      interestIndex : borrowIndex,
-      margin:0
+  function reduceAddTicketComplete(address addTicketer,uint256 compensationTokens) internal {
+     reduceTicketComplete(addTicketer,compensationTokens);
+
+     uint256 balance = balanceOf(addTicketer);
+     sortitionSumTrees.set(TREE_KEY, balance, bytes32(uint256(addTicketer)));
+     emit ReduceTicketAddTicketComplete(addTicketer,compensationTokens);
+
+  }
+  
+  /**
+  * @notice Initialize the addTicketer's clearing data
+  * @param  addTicketer  The addTicketer's address
+  * @param  compensationTokens The addTicketer's compensation amount
+  *
+  */
+  function reduceTicketComplete(address addTicketer,uint256 compensationTokens) internal{
+    AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[addTicketer];
+    totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(addTicketSnapshot.maxfee);
+    totalAddTickets = totalAddTickets.sub(addTicketSnapshot.addTicketAmount);
+    
+    accountAddTickets[addTicketer] = AddTicketSnapshot({
+      addTicketAmount: 0,
+      incurred_feeAddTicket: 0,
+      incurred_feeIndex : addTicketIndex,
+      maxfee:0
     });
 
     totalCompensation = totalCompensation.add(compensationTokens); 
@@ -571,28 +601,28 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
 
   /**
   * @notice returns the current time.  Allows for override in testing
-  * @param account The address of the borrow balance
+  * @param account The address of the addTicket balance
   *
   */
-  function borrowBalanceCurrent(address account) external override view returns(uint _borrowAmount, uint _interestBorrow,uint256 margin){
-    BorrowSnapshot memory borrowSnapshot = accountBorrows[account];
+  function addTicketBalanceCurrent(address account) external override view returns(uint _addTicketAmount, uint _incurred_feeAddTicket,uint256 maxfee){
+    AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[account];
     uint256 currentTimestamp = _currentTime();
     uint256 secondsDelta = currentTimestamp.sub(accrualTimestamp);
-    if(totalBorrows == 0 || secondsDelta == 0 ) return(borrowSnapshot.borrowAmount,borrowSnapshot.interestBorrow,borrowSnapshot.margin);
+    if(totalAddTickets == 0 || secondsDelta == 0 ) return(addTicketSnapshot.addTicketAmount,addTicketSnapshot.incurred_feeAddTicket,addTicketSnapshot.maxfee);
 
 
-    uint256 simpleInterestFactor = secondsDelta.mul(borrowRateMantissa);
-    uint256 interestAccumulated = FixedPoint.multiplyUintByMantissa(simpleInterestFactor,totalBorrows);
-    uint256 indexDeltaMantissa = FixedPoint.calculateMantissa(interestAccumulated,totalBorrows);
+    uint256 simpleIncurred_feeFactor = secondsDelta.mul(addTicketRateMantissa);
+    uint256 incurred_feeAccumulated = FixedPoint.multiplyUintByMantissa(simpleIncurred_feeFactor,totalAddTickets);
+    uint256 indexDeltaMantissa = FixedPoint.calculateMantissa(incurred_feeAccumulated,totalAddTickets);
 
-    uint256 _borrowIndex = borrowIndex.add(indexDeltaMantissa);
+    uint256 _addTicketIndex = addTicketIndex.add(indexDeltaMantissa);
 
-    uint256 deltaBorrowIndexMantissa = uint256(_borrowIndex).sub(borrowSnapshot.interestIndex);
-    //Calculate the borrowings incurred
-    uint256 newBorrows = FixedPoint.multiplyUintByMantissa(borrowSnapshot.borrowAmount, deltaBorrowIndexMantissa);
-    _borrowAmount = borrowSnapshot.borrowAmount;
-    _interestBorrow = uint256(borrowSnapshot.interestBorrow).add(newBorrows);
-    return (_borrowAmount, _interestBorrow,borrowSnapshot.margin);
+    uint256 deltaAddTicketIndexMantissa = uint256(_addTicketIndex).sub(addTicketSnapshot.incurred_feeIndex);
+    //Calculate the addTicketings incurred
+    uint256 newAddTickets = FixedPoint.multiplyUintByMantissa(addTicketSnapshot.addTicketAmount, deltaAddTicketIndexMantissa);
+    _addTicketAmount = addTicketSnapshot.addTicketAmount;
+    _incurred_feeAddTicket = uint256(addTicketSnapshot.incurred_feeAddTicket).add(newAddTickets);
+    return (_addTicketAmount, _incurred_feeAddTicket,addTicketSnapshot.maxfee);
   }
 
   /// @notice returns the current time.  Allows for override in testing.
@@ -602,32 +632,32 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   }
   
   /// @notice An award to a liquidator.
-  function liquidateCalculateSeizeTokens(address borrower) public override returns(uint256){
-    return LiquidationInterface(liquidation).liquidateCalculateSeizeTokens(address(this),borrower);
+  function reduceTicketCalculateSeizeTokens(address addTicketer) public override returns(uint256){
+    return ReduceTicketInterface(reduceTicket).reduceTicketCalculateSeizeTokens(address(this),addTicketer);
   }
   
-  /// @notice Captures any available interest as award balance.
+  /// @notice Captures any available incurred_fee as award balance.
   function captureAwardBalance(uint256 awardBalance) external onlyController override returns (uint256){
-    accrueInterest();
+    accrueIncurred_fee();
     uint256 _awardBalance;
-    if(totalsBorrowsMargin > awardBalance){
+    if(totalsAddTicketsMaxfee > awardBalance){
       _awardBalance = 0;
     }else{
-        _awardBalance = awardBalance.sub(totalsBorrowsMargin);
-        _awardBalance = _awardBalance.add(totalBorrowsInterest);
+        _awardBalance = awardBalance.sub(totalsAddTicketsMaxfee);
+        _awardBalance = _awardBalance.add(totalAddTicketsIncurred_fee);
        if(_awardBalance > totalCompensation){
         _awardBalance = _awardBalance.sub(totalCompensation);
        }else{
          _awardBalance = 0;
      }
     }
-    emit CaptureAwardBalance(awardBalance,_awardBalance,totalsBorrowsMargin,totalBorrowsInterest,totalCompensation);
+    emit CaptureAwardBalance(awardBalance,_awardBalance,totalsAddTicketsMaxfee,totalAddTicketsIncurred_fee,totalCompensation);
     return _awardBalance;
   }
   
   /// @notice Clear the reward data.
   function captureAwardBalanceComplete() external override onlyController(){
-    totalBorrowsInterest = 0;
+    totalAddTicketsIncurred_fee = 0;
     totalCompensation = 0;
   }
 

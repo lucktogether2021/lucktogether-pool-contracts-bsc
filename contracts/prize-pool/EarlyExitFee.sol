@@ -92,25 +92,25 @@ contract EarlyExitFee is Ownable,EarlyExitFeeInterface {
   }
 
   /// @notice Estimates the amount of time it will take for a given amount of funds to accrue the given amount of credit.
-  /// @param _principal The principal amount on which interest is accruing
-  /// @param _interest The amount of interest that must accrue
-  /// @return durationSeconds The duration of time it will take to accrue the given amount of interest, in seconds.
+  /// @param _principal The principal amount on which incurred_fee is accruing
+  /// @param _incurred_fee The amount of incurred_fee that must accrue
+  /// @return durationSeconds The duration of time it will take to accrue the given amount of incurred_fee, in seconds.
   function estimateCreditAccrualTime(
     address _controlledToken,
     uint256 _principal,
-    uint256 _interest
+    uint256 _incurred_fee
   )
     public
     view
     returns (uint256 durationSeconds)
   {
-    // interest = credit rate * principal * time
-    // => time = interest / (credit rate * principal)
+    // incurred_fee = credit rate * principal * time
+    // => time = incurred_fee / (credit rate * principal)
     uint256 accruedPerSecond = FixedPoint.multiplyUintByMantissa(_principal, _tokenCreditPlans[_controlledToken].creditRateMantissa);
     if (accruedPerSecond == 0) {
       return 0;
     }
-    return _interest.div(accruedPerSecond);
+    return _incurred_fee.div(accruedPerSecond);
   }
 
   /// @notice Burns a users credit.
@@ -188,7 +188,7 @@ contract EarlyExitFee is Ownable,EarlyExitFeeInterface {
     return creditBalance;
   }
 
-  /// @notice Calculates the accrued interest for a user
+  /// @notice Calculates the accrued incurred_fee for a user
   /// @param user The user whose credit should be calculated.
   /// @param controlledToken The controlled token that the user holds
   /// @param controlledTokenBalance The user's current balance of the controlled tokens.

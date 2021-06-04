@@ -21,7 +21,7 @@ interface YieldSource {
 
   function cToken() external view returns (address);
 
-  /// @notice Returns the total balance (in asset tokens).  This includes the deposits and interest.
+  /// @notice Returns the total balance (in asset tokens).  This includes the deposits and incurred_fee.
   /// @return The underlying balance of asset tokens
   function balance() external returns (uint256);
 

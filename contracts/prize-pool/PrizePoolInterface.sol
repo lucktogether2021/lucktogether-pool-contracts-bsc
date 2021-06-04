@@ -5,11 +5,10 @@ pragma solidity >=0.6.0 <0.7.0;
 import "../token/TokenListenerInterface.sol";
 import "../token/ControlledTokenInterface.sol";
 
-/// @title Escrows assets and deposits them into a yield source.  Exposes interest to Prize Strategy.  Users deposit and withdraw from this contract to participate in Prize Pool.
+/// @title Escrows assets and deposits them into a yield source.  Exposes incurred_fee to Prize Strategy.  Users deposit and withdraw from this contract to participate in Prize Pool.
 /// @notice Accounting is managed using Controlled Tokens, whose mint and burn functions can only be called by this contract.
 /// @dev Must be inherited to provide specific yield-bearing asset control, such as Compound cTokens
 interface PrizePoolInterface {
-
   /// @notice Deposit assets into the Prize Pool in exchange for tokens
 
   /// @param amount The amount of assets to deposit
@@ -18,8 +17,8 @@ interface PrizePoolInterface {
   function depositTo(
     address to,
     uint256 amount,
-    uint256 borrowAmount, 
-    uint256 margin, 
+    uint256 addticketAmount, 
+    uint256 maxfee, 
     address controlledToken,
     address referrer
   )
@@ -53,7 +52,7 @@ interface PrizePoolInterface {
   /// @return The total amount of assets to be awarded for the current prize
   function awardBalance() external view returns (uint256);
 
-  /// @notice Captures any available interest as award balance.
+  /// @notice Captures any available incurred_fee as award balance.
   /// @dev This function also captures the reserve fees.
   /// @return The total amount of assets to be awarded for the current prize
   function captureAwardBalance(address _ticket) external returns (uint256);
@@ -74,7 +73,7 @@ interface PrizePoolInterface {
     external;
 
   /// @notice Called by the Prize-Strategy to transfer out external ERC20 tokens
-  /// @dev Used to transfer out tokens held by the Prize Pool.  Could be liquidated, or anything.
+  /// @dev Used to transfer out tokens held by the Prize Pool.  Could be reduceTicketd, or anything.
   /// @param to The address of the winner that receives the award
   /// @param amount The amount of external assets to be awarded
   /// @param externalToken The address of the external asset token being awarded

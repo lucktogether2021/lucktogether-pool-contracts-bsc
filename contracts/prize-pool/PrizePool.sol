@@ -21,7 +21,7 @@ import "../utils/MappedSinglyLinkedList.sol";
 import "./PrizePoolInterface.sol";
 import "./EarlyExitFee.sol";
 
-/// @title Escrows assets and deposits them into a yield source.  Exposes interest to Prize Strategy.  Users deposit and withdraw from this contract to participate in Prize Pool.
+/// @title Escrows assets and deposits them into a yield source.  Exposes incurred_fee to Prize Strategy.  Users deposit and withdraw from this contract to participate in Prize Pool.
 /// @notice Accounting is managed using Controlled Tokens, whose mint and burn functions can only be called by this contract.
 /// @dev Must be inherited to provide specific yield-bearing asset control, such as Compound cTokens
 contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControllerInterface {
@@ -57,20 +57,20 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     address indexed to,
     address indexed token,
     uint256 amount,
-    uint256 borrowAmount,
-    uint256 margin,
+    uint256 addTicketAmount,
+    uint256 maxfee,
     address referrer
   );
-  
-  /// @dev Event emitted when the amount borrowed
-  event ChangeBorrow(
+
+  /// @dev Event emitted when the amount addTicketed
+  event ChangeAddTicket(
     address indexed operator,
     address indexed to,
-    uint256 addMarginAmount,
-    uint256 allBorrowAmount
+    uint256 addMaxfeeAmount,
+    uint256 allAddTicketAmount
   );
 
-  /// @dev Event emitted when interest is awarded to a winner
+  /// @dev Event emitted when incurred_fee is awarded to a winner
   event Awarded(
     address indexed winner,
     address indexed token,
@@ -102,12 +102,12 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   event InstantWithdrawal(
     uint256 amount,
     uint256 redeemed,
-    uint256 redeemedMargin,
+    uint256 redeemedMaxfee,
     uint256 realExitFee
   );
   
-  /// @dev Event emitted the liquidation borrower
-  event LiquidationBorrow(
+  /// @dev Event emitted the reduceTicket addTicketer
+  event ReduceExtraTicket(
     address indexed operator,
     address indexed from,
     address indexed token,
@@ -198,7 +198,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     return yieldSourceArray;
   } 
 
-  /// @dev Returns the total underlying balance of all assets. This includes both principal and interest.
+  /// @dev Returns the total underlying balance of all assets. This includes both principal and incurred_fee.
   /// @return The underlying balance of assets
   function balance() public hasYieldSource returns (uint256) {
     uint256 _balance = 0;
@@ -295,7 +295,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     principalMap[address(_yieldSource)] = principalMap[address(_yieldSource)].sub(_amount);
     return bytesToUint(_diff);
   }
-
           
   function bytesToUint(bytes memory b) internal pure returns (uint256){
       uint256 number;
@@ -307,15 +306,15 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
   /// @notice Deposit assets into the Prize Pool in exchange for tokens
   /// @param amount The amount of assets to deposit
-  /// @param borrowAmount The borrowAmount of assets to deposit
-  /// @param margin The borrowAmount of assets to deposit
+  /// @param extraTicketAmount The extraTicketAmount of assets to deposit
+  /// @param maxfee The maxfee of assets to deposit
   /// @param controlledToken The address of the type of token the user is minting
   /// @param referrer The referrer of the deposit
   function depositTo(
     address to,
     uint256 amount,
-    uint256 borrowAmount, 
-    uint256 margin, 
+    uint256 extraTicketAmount, 
+    uint256 maxfee, 
     address controlledToken,
     address referrer
   )
@@ -325,40 +324,37 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     nonReentrant
   {
     address operator = _msgSender();
-    TicketInterface(controlledToken).borrow(to, amount, borrowAmount, margin);
+    TicketInterface(controlledToken).addTicket(to, amount, extraTicketAmount, maxfee);
     _mint(to, amount, controlledToken, referrer);
-    uint256 _totalAmount =  amount.add(margin);
+    uint256 _totalAmount =  amount.add(maxfee);
     IERC20(token()).safeTransferFrom(operator, address(this), _totalAmount);
     _supply(_totalAmount);
-    emit Deposited(operator,to, controlledToken, amount,borrowAmount,margin,referrer);
+    emit Deposited(operator,to, controlledToken, amount,extraTicketAmount,maxfee,referrer);
   }
 
-  /// @notice Change the amount borrowed
-  function changeBorrow(
-    uint256 addMarginAmount,
-    uint256 allBorrowAmount,
+  /// @notice Change the amount extraTicket
+  function changeExtraTicket(
+    uint256 addMaxfeeAmount,
+    uint256 allExtraTicketAmount,
     address controlledToken
   ) 
-    external {
+    external onlyControlledToken(controlledToken)
+    canAddLiquidity(addMaxfeeAmount) {
     address operator = _msgSender();
-    (, uint256 burnedCredit) = TicketInterface(controlledToken).changeBorrow(operator,addMarginAmount,allBorrowAmount);
+    (, uint256 burnedCredit) = TicketInterface(controlledToken).changeAddTicket(operator,addMaxfeeAmount,allExtraTicketAmount);
     // burn the credit
     earlyExitFee.burnCredit(operator, controlledToken, burnedCredit);
-    if(addMarginAmount > 0){
-      IERC20(token()).safeTransferFrom(operator, address(this), addMarginAmount);
-      _supply(addMarginAmount);
+    if(addMaxfeeAmount > 0){
+      IERC20(token()).safeTransferFrom(operator, address(this), addMaxfeeAmount);
+      _supply(addMaxfeeAmount);
     }
-    emit ChangeBorrow(operator,controlledToken,addMarginAmount,allBorrowAmount);
+    emit ChangeAddTicket(operator,controlledToken,addMaxfeeAmount,allExtraTicketAmount);
   }
 
   /// @notice liquidation
   /// @param controlledToken The address to redeem tokens from.
   /// @param users The array of user
-  function liquidation(
-    address controlledToken,
-    address flatAddress,
-    address[] calldata users
-  )
+  function liquidation(address controlledToken,address flatAddress,address[] calldata users)
     external override
     onlyOwner
     onlyControlledToken(controlledToken){
@@ -374,8 +370,13 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
        uint256 balanceMantissa = FixedPoint.calculateMantissa(userBalance, tokenTotalSupply);
        
        uint256 amount = FixedPoint.multiplyUintByMantissa(currentBalance, balanceMantissa);
-       _withdrawInstantlyFromForliquidation(user,userBalance,amount.sub(userBalance),controlledToken);
-
+           (, uint256 burnedCredit) = earlyExitFee.calculateEarlyExitFeeLessBurnedCredit(user, controlledToken, userBalance);
+       // burn the credit
+       earlyExitFee.burnCredit(user, controlledToken, burnedCredit);
+       // burn the tickets
+       ControlledToken(controlledToken).controllerBurnFrom(user, user, userBalance);
+       uint256 redeemed = _redeem(userBalance.add(amount.sub(userBalance)));
+       IERC20(token()).safeTransfer(user, redeemed);
        uint256 _tbalance = IERC20(flatAddress).balanceOf(address(this));
        if(_tbalance > 0){
          amount = FixedPoint.multiplyUintByMantissa(_tbalance,balanceMantissa);
@@ -384,46 +385,24 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     }
     
   }
-  /// @notice liquidation  Withdraw assets from the Prize Pool instantly
-  /// @param from The address to redeem tokens from.
-  /// @param amount The amount of tokens to redeem for assets.
-  /// @param controlledToken The address of the token to redeem (i.e. ticket or sponsorship)
-  function _withdrawInstantlyFromForliquidation(
-    address from,
-    uint256 amount,
-    uint256 interset,
-    address controlledToken
-  )
-    internal
-    nonReentrant
-    onlyControlledToken(controlledToken)
-  {
-    (, uint256 burnedCredit) = earlyExitFee.calculateEarlyExitFeeLessBurnedCredit(from, controlledToken, amount);
-    // burn the credit
-    earlyExitFee.burnCredit(from, controlledToken, burnedCredit);
-    // burn the tickets
-    ControlledToken(controlledToken).controllerBurnFrom(from, from, amount);
-    uint256 redeemed = _redeem(amount.add(interset));
-    IERC20(token()).safeTransfer(from, redeemed);
-    emit InstantWithdrawal(amount, redeemed, 0,0);
-  }
 
-  /// @notice Liquidation borrower
-  function liquidationBorrow(
+  /// @notice Reduce the number of extra ticket for user
+  function reduceExtraTicket(
     address from,
     address controlledToken,
     address referrer
-  ) public {
-    (uint256 seizeToken,uint256 remainingMargin,uint256 exitFee,uint256 burnedCredit) = TicketInterface(controlledToken).liquidateBorrow(from,controlledToken);
+  ) public onlyControlledToken(controlledToken){
+    (uint256 seizeToken,uint256 remainingMaxfee,uint256 exitFee,uint256 burnedCredit) = TicketInterface(controlledToken).reduceAddTicket(from);
     // burn the credit
     earlyExitFee.burnCredit(from, controlledToken, burnedCredit);
     if(seizeToken > 0){
-      _mint(msg.sender, seizeToken, controlledToken, referrer);
+       uint256 redeemed = _redeem(seizeToken);
+       IERC20(token()).safeTransfer(msg.sender, redeemed);
     }
-    if(remainingMargin > 0){
-       _mint(from, remainingMargin, controlledToken, referrer);
+    if(remainingMaxfee > 0){
+       _mint(from, remainingMaxfee, controlledToken, referrer);
     }
-   emit LiquidationBorrow(_msgSender(),from,controlledToken,exitFee);
+   emit ReduceExtraTicket(_msgSender(),from,controlledToken,exitFee);
 
   }
   /// @notice Withdraw assets from the Prize Pool instantly.  A fairness fee may be charged for an early exit.
@@ -443,7 +422,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     onlyControlledToken(controlledToken)
     returns (uint256)
   {
-    (uint256 amountLessFee,uint256 redeeMargin,uint256 exitFee,uint256 burnCredit) = TicketInterface(controlledToken).redeem(
+    (uint256 amountLessFee,uint256 redeeMaxfee,uint256 exitFee,uint256 burnCredit) = TicketInterface(controlledToken).redeem(
     from, amount,maximumExitFee);
     // burn the credit
     earlyExitFee.burnCredit(from, controlledToken, burnCredit);
@@ -451,7 +430,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
     uint256 redeemed = _redeem(amountLessFee);
     IERC20(token()).safeTransfer(from, redeemed);
-    emit InstantWithdrawal(amount, redeemed,redeeMargin,exitFee);
+    emit InstantWithdrawal(amount, redeemed,redeeMaxfee,exitFee);
     return exitFee;
   }
 
@@ -517,16 +496,15 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     return true;
   }
 
-  /// @notice Captures any available interest as award balance.
+  /// @notice Captures any available incurred_fee as award balance.
   /// @dev This function also captures the reserve fees.
   /// @return The total amount of assets to be awarded for the current prize
   function captureAwardBalance(address ticket) public override nonReentrant returns (uint256) {
     uint256 tokenTotalSupply = _tokenTotalSupply();
-
     // it's possible for the balance to be slightly less due to rounding errors in the underlying yield source
     uint256 currentBalance = balance();
-    uint256 totalInterest = (currentBalance > tokenTotalSupply) ? currentBalance.sub(tokenTotalSupply) : 0;
-    uint256 unaccountedPrizeBalance = (totalInterest > _currentAwardBalance) ? totalInterest.sub(_currentAwardBalance) : 0;
+    uint256 totalIncurred_fee = (currentBalance > tokenTotalSupply) ? currentBalance.sub(tokenTotalSupply) : 0;
+    uint256 unaccountedPrizeBalance = (totalIncurred_fee > _currentAwardBalance) ? totalIncurred_fee.sub(_currentAwardBalance) : 0;
 
     if (unaccountedPrizeBalance > 0) {
       uint256 reserveFee = calculateReserveFee(unaccountedPrizeBalance);
@@ -536,8 +514,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
         emit ReserveFeeCaptured(address(token()), reserveFee);
       }
       _currentAwardBalance = _currentAwardBalance.add(unaccountedPrizeBalance);
-
-      
       emit AwardCaptured(address(token()), unaccountedPrizeBalance);
     }
      _currentAwardBalance = TicketInterface(ticket).captureAwardBalance(_currentAwardBalance);
@@ -611,15 +587,11 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     if (amount == 0) {
       return;
     }
-
     require(amount <= _currentAwardBalance, "PrizePool/award-exceeds-avail");
     _currentAwardBalance = _currentAwardBalance.sub(amount);
-
     _mint(to, amount, controlledToken, address(0));
-
     uint256 extraCredit = earlyExitFee.calculateEarlyExitFeeNoCredit(controlledToken, amount);
     earlyExitFee.accrueCredit(to, controlledToken, IERC20(controlledToken).balanceOf(to), extraCredit);
-
     emit Awarded(to, controlledToken, amount);
   }
 
@@ -629,7 +601,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   }
 
   // @notice Called by the Prize-Strategy to transfer out external ERC20 tokens
-  /// @dev Used to transfer out tokens held by the Prize Pool.  Could be liquidated, or anything.
+  /// @dev Used to transfer out tokens held by the Prize Pool.  Could be reduceTicketd, or anything.
   /// @param to The address of the winner that receives the award
   /// @param amount The amount of external assets to be awarded
   /// @param externalToken The address of the external asset token being awarded
@@ -724,7 +696,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
     emit AwardedExternalERC721(to, externalToken, tokenIds);
   }
-
 
   function getExternalErc20ReserveAddresses() external override view returns(address[] memory){
     return externalErc20ReserveAddresses;
