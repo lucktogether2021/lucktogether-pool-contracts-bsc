@@ -66,7 +66,7 @@ contract ReduceTicket is Ownable, ReduceTicketInterface{
     uint256 addPrincipal,uint256 addAddTicketAmount,uint256 addMaxfee,
     uint256 addTicketAmount,uint256 incurred_feeAddTicket,uint256 maxfee,uint256 addTicketRateMantissa) external override {
        (uint128 creditLimitMantissa,) = creditPlanOf(controlledToken); 
-       uint256 _exitFee = FixedPoint.multiplyUintByMantissa(addTicketAmount,creditLimitMantissa);
+       uint256 _exitFee = FixedPoint.multiplyUintByMantissa(addAddTicketAmount,creditLimitMantissa);
        if(addAddTicketAmount != 0 || addMaxfee != 0){
          arriveLossValue(controlledToken,account,addPrincipal,addAddTicketAmount,addMaxfee,addTicketRateMantissa,_exitFee);
        }
