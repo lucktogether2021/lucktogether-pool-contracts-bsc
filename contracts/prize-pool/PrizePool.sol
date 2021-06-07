@@ -505,6 +505,8 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     uint256 currentBalance = balance();
     uint256 totalIncurred_fee = (currentBalance > tokenTotalSupply) ? currentBalance.sub(tokenTotalSupply) : 0;
     uint256 unaccountedPrizeBalance = (totalIncurred_fee > _currentAwardBalance) ? totalIncurred_fee.sub(_currentAwardBalance) : 0;
+    
+    unaccountedPrizeBalance = TicketInterface(ticket).captureAwardBalance(unaccountedPrizeBalance);
 
     if (unaccountedPrizeBalance > 0) {
       uint256 reserveFee = calculateReserveFee(unaccountedPrizeBalance);
@@ -516,7 +518,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
       _currentAwardBalance = _currentAwardBalance.add(unaccountedPrizeBalance);
       emit AwardCaptured(address(token()), unaccountedPrizeBalance);
     }
-     _currentAwardBalance = TicketInterface(ticket).captureAwardBalance(_currentAwardBalance);
+  
 
     for (uint256 i = 0; i < externalErc20ReserveAddresses.length; i++) {
       captureAwardErc20Balance(externalErc20ReserveAddresses[i]);
