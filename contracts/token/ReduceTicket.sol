@@ -86,14 +86,6 @@ contract ReduceTicket is Ownable, ReduceTicketInterface{
     }
 
     /**
-     * @notice Whether to allow the redeem of assets
-     */
-     function redeemAllowed(address controlledToken,address account,uint256 addTicketAmount,uint256 incurred_feeAddTicket,
-     uint256 maxfee) external override {
-       arriveRiskValue(controlledToken,account,0,addTicketAmount,incurred_feeAddTicket,maxfee);
-     }
-
-    /**
      * @notice More than the reduceTicket threshold
      */
     function arriveLossValue(address controlledToken,address account,uint256 principal,uint256 addTicketAmount,uint256 maxfee,
