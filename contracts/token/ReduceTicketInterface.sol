@@ -26,8 +26,6 @@ interface ReduceTicketInterface {
     uint256 currentPrincipal,uint256 currentAddTicketAmount,uint256 currentmaxfee,
     uint256 addTicketAmount,uint256 incurred_feeAddTicket,uint256 maxfee,uint256 addTicketRateMantissa) external;
 
-    function redeemAllowed(address controlledToken,address account,uint256 addTicketAmount,uint256 incurred_feeAddTicket,uint256 maxfee) external;
-
     function changeAddTicketAllowed(address controlledToken,address account,uint256 principal,uint256 addAddTicketAmount,uint256 addTicketAmount,
      uint256 incurred_feeAddTicket,uint256 maxfee,uint256 addTicketRateMantissa) external;
 
