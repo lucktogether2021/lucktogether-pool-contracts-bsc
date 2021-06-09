@@ -196,7 +196,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
   function getYieldSource() external view returns(YieldSource[] memory){
     return yieldSourceArray;
-  } 
+  }
 
   /// @dev Returns the total underlying balance of all assets. This includes both principal and incurred_fee.
   /// @return The underlying balance of assets
@@ -505,7 +505,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     uint256 currentBalance = balance();
     uint256 totalIncurred_fee = (currentBalance > tokenTotalSupply) ? currentBalance.sub(tokenTotalSupply) : 0;
     uint256 unaccountedPrizeBalance = (totalIncurred_fee > _currentAwardBalance) ? totalIncurred_fee.sub(_currentAwardBalance) : 0;
-    
+
     unaccountedPrizeBalance = TicketInterface(ticket).captureAwardBalance(unaccountedPrizeBalance);
 
     if (unaccountedPrizeBalance > 0) {
@@ -596,12 +596,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     earlyExitFee.accrueCredit(to, controlledToken, IERC20(controlledToken).balanceOf(to), extraCredit);
     emit Awarded(to, controlledToken, amount);
   }
-
-  function calculateEarlyExitFeeNoCredit(address controlledToken, uint256 amount) external override view returns(uint256){
-    return earlyExitFee.calculateEarlyExitFeeNoCredit(controlledToken, amount);
-
-  }
-
   // @notice Called by the Prize-Strategy to transfer out external ERC20 tokens
   /// @dev Used to transfer out tokens held by the Prize Pool.  Could be reduceTicketd, or anything.
   /// @param to The address of the winner that receives the award
@@ -744,26 +738,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     emit EarlyExitFeeSet(address(_earlyExitFee));
   }
 
-  /// @notice Calculates the early exit fee for the given amount
-  /// @param from The user who is withdrawing
-  /// @param controlledToken The type of collateral being withdrawn
-  /// @param amount The amount of collateral to be withdrawn
-  /// @return exitFee The exit fee
-  /// @return burnedCredit The user's credit that was burned
-  function calculateEarlyExitFee(
-    address from,
-    address controlledToken,
-    uint256 amount
-  )
-    external override
-    returns (
-      uint256 exitFee,
-      uint256 burnedCredit
-    )
-  {
-    return earlyExitFee.calculateEarlyExitFeeLessBurnedCredit(from, controlledToken, amount);
-  }
-
   /// @notice Calculates the reserve portion of the given amount of funds.  If there is no reserve address, the portion will be zero.
   /// @param amount The prize amount
   /// @return The size of the reserve portion of the prize
@@ -778,24 +752,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     }
     return FixedPoint.multiplyUintByMantissa(amount, reserveRateMantissa);
   }
-
-  /// @notice Returns the credit rate of a controlled token
-  /// @param controlledToken The controlled token to retrieve the credit rates for
-  /// @return creditLimitMantissa The credit limit fraction.  This number is used to calculate both the credit limit and early exit fee.
-  /// @return creditRateMantissa The credit rate. This is the amount of tokens that accrue per second.
-  function creditPlanOf(
-    address controlledToken
-  )
-    external override
-    view
-    returns (
-      uint128,
-      uint128
-    )
-  {
-    return earlyExitFee.creditPlanOf(controlledToken);
-  }
-
   function upDataSortitionSumTrees(address _ticket,address _address,uint256 _amount) external override onlyPrizeStrategy{
     TicketInterface(_ticket).upDataSortitionSumTrees(_address,_amount);
   }

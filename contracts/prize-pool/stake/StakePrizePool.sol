@@ -5,14 +5,15 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@pooltogether/fixed-point/contracts/FixedPoint.sol";
 
 import "../YieldSource.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "../../external/compound/CTokenInterface.sol";
 import "../../external/compound/ComptrollerInterface.sol";
 
-contract StakePrizePool is YieldSource {
+contract StakePrizePool is YieldSource,Ownable {
     using SafeMath for uint256;
     
     event StakePrizePoolInitialized(address indexed token);
-    event Claim();
+    event Claim(address _address);
     event Transfer(uint256 amount);
     
     IERC20 override public token;
@@ -47,14 +48,14 @@ contract StakePrizePool is YieldSource {
         return redeemAmount;
     }
 
-    function claim() external override {
+    function claim(address _address) external override {
     }
 
     function priority() external override returns (uint256){
         return _priority;
     }
 
-    function setPriority(uint256 _v) external returns (bool){
+    function setPriority(uint256 _v) external onlyOwner returns (bool){
         _priority = _v;
         return true;
     }
@@ -63,7 +64,7 @@ contract StakePrizePool is YieldSource {
         return _availableQuota;
     }
 
-    function setAvailableQuota(uint256 _v) external returns (bool){
+    function setAvailableQuota(uint256 _v) external onlyOwner returns (bool){
         _availableQuota = _v;
         return true;
     }

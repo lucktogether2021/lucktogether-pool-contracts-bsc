@@ -5,14 +5,15 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@pooltogether/fixed-point/contracts/FixedPoint.sol";
 
 import "../YieldSource.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "../../external/compound/CTokenInterface.sol";
 import "../../external/compound/ComptrollerInterface.sol";
 
-contract VenusPrizePool is YieldSource {
+contract VenusPrizePool is YieldSource,Ownable {
     using SafeMath for uint256;
     
     event VenesPrizePoolInitialized(address indexed c);
-    event Claim();
+    event Claim(address _address);
     event Transfer(uint256 amount);
     
     CTokenInterface public cTokenObject;
@@ -56,28 +57,32 @@ contract VenusPrizePool is YieldSource {
         return diff;
     }
 
-    function claim() external override {
+    function claim(address _address) external override {
         address comptroller = cTokenObject.comptroller();
         address[] memory cTokens = new address[](1);
         cTokens[0] =address(cTokenObject);
-        ComptrollerInterface(comptroller).claimVenus(address(this),cTokens);
-        emit Claim();
+        ComptrollerInterface(comptroller).claimVenus(_address,cTokens);
+        emit Claim(_address);
     }
 
     function priority() external override returns (uint256){
         return _priority;
     }
 
-    function setPriority(uint256 _v) external returns (bool){
+    function setPriority(uint256 _v) external onlyOwner returns (bool){
         _priority = _v;
         return true;
     }
 
     function availableQuota() external override returns (uint256){
-        return _availableQuota;
+        if(_availableQuota <= cTokenObject.balanceOfUnderlying(msg.sender)){
+           return 0;
+        }else{
+           return _availableQuota.sub(cTokenObject.balanceOfUnderlying(msg.sender));
+        }
     }
 
-    function setAvailableQuota(uint256 _v) external returns (bool){
+    function setAvailableQuota(uint256 _v) external onlyOwner returns (bool){
         _availableQuota = _v;
         return true;
     }
