@@ -34,7 +34,7 @@ interface YieldSource {
   function redeem(uint256 redeemAmount, address _cToken) external returns (uint256);
 
   /// @notice claim
-  function claim() external;
+  function claim(address _address) external;
 
   function priority() external returns (uint256);
 

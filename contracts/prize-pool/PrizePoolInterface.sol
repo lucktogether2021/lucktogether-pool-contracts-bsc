@@ -108,37 +108,6 @@ interface PrizePoolInterface {
   )
     external;
 
-  /// @notice Calculates the early exit fee for the given amount
-  /// @param from The user who is withdrawing
-  /// @param controlledToken The type of collateral being withdrawn
-  /// @param amount The amount of collateral to be withdrawn
-  /// @return exitFee The exit fee
-  /// @return burnedCredit The user's credit that was burned
-  function calculateEarlyExitFee(
-    address from,
-    address controlledToken,
-    uint256 amount
-  )
-    external
-    returns (
-      uint256 exitFee,
-      uint256 burnedCredit
-    );
-
-  /// @notice Returns the credit rate of a controlled token
-  /// @param controlledToken The controlled token to retrieve the credit rates for
-  /// @return creditLimitMantissa The credit limit fraction.  This number is used to calculate both the credit limit and early exit fee.
-  /// @return creditRateMantissa The credit rate. This is the amount of tokens that accrue per second.
-  function creditPlanOf(
-    address controlledToken
-  )
-    external
-    view
-    returns (
-      uint128 creditLimitMantissa,
-      uint128 creditRateMantissa
-    );
-
   /// @notice Allows the Governor to set a cap on the amount of liquidity that he pool can hold
   /// @param _liquidityCap The new liquidity cap for the prize pool
   function setLiquidityCap(uint256 _liquidityCap) external;
@@ -161,7 +130,4 @@ interface PrizePoolInterface {
 
   /// @notice externalErc20ReserveAddresses.
   function getExternalErc20ReserveAddresses() external view returns(address[] memory);
-
-  function calculateEarlyExitFeeNoCredit(address controlledToken, uint256 amount) external view returns(uint256);
-
 }
