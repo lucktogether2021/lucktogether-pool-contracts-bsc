@@ -305,7 +305,7 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
     emit AddTicket(addTicketer,principal,addTicketAmount,maxfee);
   }
   
-  /**
+ /**
   * @notice Sender redeems ticket in exchange for the asset
   *
   */
@@ -317,26 +317,42 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
     uint256 burnedCredit;
     address _from = from;
     uint256 _amount = amount;
-    (uint256 _redeemTokens,uint256 _redeemAddTicketAmount,uint256 _redeemMaxfee,bool isReddemAll,bool _isMoreThanRiskValue) = redeemInternal(_from, _amount);
-    uint256 _allAmount = _redeemTokens.add(_redeemAddTicketAmount);
-
-    (exitFee, burnedCredit) = ReduceTicketInterface(reduceTicket).calculateEarlyExitFee(_from, address(this), _allAmount);
+    (uint256 _redeemTokens,uint256 _redeemAddTicketAmount,uint256 _redeemMaxfee,bool isReddemAll) = redeemInternal(_from, _amount);
+  
+    (exitFee, burnedCredit) = ReduceTicketInterface(reduceTicket).calculateEarlyExitFee(_from, address(this), _redeemTokens.add(_redeemAddTicketAmount));
     require(exitFee <= maximumExitFee, "PrizePool/exit-fee-exceeds-user-maximum");
-    if(!_isMoreThanRiskValue && accountAddTickets[_from].addTicketAmount != 0){
+    uint _maxfee;
+    if(_redeemAddTicketAmount != 0 && accountAddTickets[_from].addTicketAmount != 0){
+      _maxfee = accountAddTickets[_from].maxfee.sub(accountAddTickets[_from].incurred_feeAddTicket);
        redeemComplete(_from,_redeemAddTicketAmount,isReddemAll);
     }
-    uint _exitFee;
-    if(_redeemAddTicketAmount == 0){
-       _exitFee = exitFee;
-    }else{
-      uint256 _allTokens = _redeemTokens.add(_redeemAddTicketAmount);
-      _exitFee = exitFee.mul(_redeemTokens).div(_allTokens);
-      uint256 _burnMaxfee = exitFee.sub(_exitFee);
-      exitFeeBurnMaxfee(_from, _burnMaxfee);
+
+    (uint256 _exitFee,uint256 _burnMaxfee) = redeemCalculateBurnMaxfee(_redeemTokens,_redeemAddTicketAmount,exitFee);
+    if(_burnMaxfee > 0){
+      if(isReddemAll){
+        _redeemMaxfee = _maxfee.sub(_burnMaxfee);
+      }else{
+        exitFeeBurnMaxfee(_from, _burnMaxfee);
+      }
     }
     // redeem the tickets less the fee
     uint256 amountLessFee = _amount.sub(_exitFee).add(_redeemMaxfee);
     return (amountLessFee,_redeemMaxfee,exitFee,burnedCredit);
+  }
+
+  function redeemCalculateBurnMaxfee(uint256 _redeemTokens,uint256 _redeemAddTicketAmount,uint256 exitFee) internal pure returns(uint256,uint256){
+
+    uint256 _exitFee;
+    uint256 _burnMaxfee;
+    if(_redeemAddTicketAmount == 0){
+       _exitFee = exitFee;
+    }else{
+      uint256 _allTokens = _redeemTokens.add(_redeemAddTicketAmount);
+      _burnMaxfee = exitFee.mul(_redeemAddTicketAmount).div(_allTokens);
+      _exitFee = exitFee.sub(_burnMaxfee);
+    }
+    return(_exitFee,_burnMaxfee);
+
   }
 
   /**
@@ -345,13 +361,13 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   * @param redeemTokens redeemTokens The number of cTokens to redeem
   *
   */
-function redeemInternal(address redeemAddress,uint256 redeemTokens) internal returns(uint256,uint256,uint256,bool,bool){
+function redeemInternal(address redeemAddress,uint256 redeemTokens) internal returns(uint256,uint256,uint256,bool){
       accrueIncurred_fee();
       uint256 _originalBalance = balanceOf(redeemAddress);
       uint256 _balance = _originalBalance.sub(redeemTokens);
       if(accountAddTickets[redeemAddress].addTicketAmount == 0){
          emit Reddem(redeemTokens,0,0,_balance == 0);
-         return (redeemTokens,0,0,_balance == 0,false);
+         return (redeemTokens,0,0,_balance == 0);
       }
       fresh(redeemAddress,0,0,false);
 
@@ -362,35 +378,31 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
       uint256 _addTicketAmountNew;
  
       uint256 _riskValue;
-      bool _isMoreThanRiskValue = false;
       if(_balance == 0){
         _riskValue = FixedPoint.multiplyUintByMantissa(ReduceTicketInterface(reduceTicket).calculateCurrentRiskValue(address(this),_redeem,
         accountAddTickets[_redeem].addTicketAmount,accountAddTickets[_redeem].incurred_feeAddTicket,accountAddTickets[_redeem].maxfee),1);
-        uint256 exitFee =  ReduceTicketInterface(reduceTicket).getExitFee(address(this), _redeem, 0, accountAddTickets[_redeem].addTicketAmount);
         if(_riskValue != 0){
           _redeemMaxfee = redeemMoreThanRiskInternal(_redeem);
-          _isMoreThanRiskValue = true;
+          _redeemAddTicketAmount = 0;
         }else{
-          _redeemMaxfee = accountAddTickets[_redeem].maxfee.sub(accountAddTickets[_redeem].incurred_feeAddTicket).sub(exitFee);
+          _redeemAddTicketAmount = accountAddTickets[_redeem].addTicketAmount;
         }
-        _redeemAddTicketAmount = 0;
        
       }else{
         _addTicketAmountNew = accountAddTickets[_redeem].addTicketAmount.mul(_balance).div(_originalBalance);
         _redeemAddTicketAmount = accountAddTickets[_redeem].addTicketAmount.sub(_addTicketAmountNew);
         
         _riskValue = FixedPoint.multiplyUintByMantissa(ReduceTicketInterface(reduceTicket).calculateCurrentRiskValue(address(this),_redeem,
-        _addTicketAmountNew,accountAddTickets[_redeem].incurred_feeAddTicket,accountAddTickets[_redeem].maxfee),1);
+       _addTicketAmountNew,accountAddTickets[_redeem].incurred_feeAddTicket,accountAddTickets[_redeem].maxfee),1);
        if(_riskValue != 0){
           _redeemMaxfee = redeemMoreThanRiskInternal(_redeem);
           _redeemAddTicketAmount = 0;
-          _isMoreThanRiskValue = true;
        }
 
       }
      _redeemTokens = redeemTokens; 
      emit Reddem(_redeemTokens,_redeemAddTicketAmount,_redeemMaxfee,_balance == 0);
-     return (_redeemTokens,_redeemAddTicketAmount,_redeemMaxfee,_balance == 0,_isMoreThanRiskValue);
+     return (_redeemTokens,_redeemAddTicketAmount,_redeemMaxfee,_balance == 0);
 }
   
   /**
