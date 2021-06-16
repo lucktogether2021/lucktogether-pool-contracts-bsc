@@ -209,7 +209,7 @@ contract EarlyExitFee is Ownable,EarlyExitFeeInterface {
   /// @param user The user whose credit balance should be returned
   /// @return The balance of the users credit
   function balanceOfCredit(address user, address controlledToken) external returns (uint256) {
-    accrueCredit(user, controlledToken, IERC20(controlledToken).balanceOf(user), 0);
+    accrueCreditInternal(user, controlledToken, IERC20(controlledToken).balanceOf(user), 0);
     return _tokenCreditBalances[controlledToken][user].balance;
   }
 
@@ -354,7 +354,7 @@ contract EarlyExitFee is Ownable,EarlyExitFeeInterface {
   
   /// @dev Function modifier to ensure that the caller is the controller contract
   modifier onlyController {
-    require(_msgSender() == address(controller), "ControlledToken/only-controller");
+    require(_msgSender() == address(controller), "EarlyExitFee/only-controller");
     _;
   }
 }

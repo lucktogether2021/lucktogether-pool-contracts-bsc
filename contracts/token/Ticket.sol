@@ -22,9 +22,9 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   SortitionSumTreeFactory.SortitionSumTrees internal sortitionSumTrees;
 
   /**
-  * @notice addTicket rate that can ever be applied (.0005% / timestamp)
+  * @notice addTicket rate that can ever be applied (0.0002)
   */
-  uint public override addTicketRateMantissa = 3170979198;
+  uint public override addTicketRateMantissa = 2314814814;
 
   /**
   * @notice Total amount of compensation
@@ -78,6 +78,8 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
 
   /// @dev Emitted Burn the user's maxfee
   event ExitFeeBurnMaxfee(uint256 burnMaxfee);
+
+  event CaptureUserLiquidationBalance(uint256 balance,uint256 remainingMaxfee,uint256 compensation);
 
   event ChangeAddTicket(uint256 allAddTicketAmount,uint256 addMaxfeeAmount,uint256 currrentMaxfee);
 
@@ -258,10 +260,10 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
    * @param addTicketer The address to increase maxFee
    * 
    */
-  function addMaxFee(address addTicketer,uint256 maxFeeAmount) internal {
+  function addMaxfee(address addTicketer,uint256 maxfeeAmount) internal {
     AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[addTicketer];
-    accountAddTickets[addTicketer].maxfee = addTicketSnapshot.maxfee.add(maxFeeAmount);
-    totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.add(maxFeeAmount);
+    accountAddTickets[addTicketer].maxfee = addTicketSnapshot.maxfee.add(maxfeeAmount);
+    totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.add(maxfeeAmount);
 
   }
 
@@ -273,7 +275,7 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   function addTicket(address addTicketer,uint256 principal,uint256 addTicketAmount,uint256 maxfee) 
   override external onlyController{
     if(principal == 0 && addTicketAmount == 0 && maxfee != 0){
-      addMaxFee(addTicketer,maxfee);
+      addMaxfee(addTicketer,maxfee);
     }else{
       accrueIncurred_fee();
       if(addTicketAmount != 0 || accountAddTickets[addTicketer].addTicketAmount != 0){ 
@@ -305,7 +307,7 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
     emit AddTicket(addTicketer,principal,addTicketAmount,maxfee);
   }
   
- /**
+  /**
   * @notice Sender redeems ticket in exchange for the asset
   *
   */
@@ -647,9 +649,30 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   function reduceTicketCalculateSeizeTokens(address addTicketer) public override returns(uint256){
     return ReduceTicketInterface(reduceTicket).reduceTicketCalculateSeizeTokens(address(this),addTicketer);
   }
+
+   /// @notice Calculates the user's balance at the time of liquidation.
+  function captureUserLiquidationBalance(address user) external override returns(uint256){
+    fresh(user,0,0,false); 
+    uint256 _incurredFeeAddTicket = accountAddTickets[user].incurred_feeAddTicket;   
+    uint256 _maxfee = accountAddTickets[user].maxfee;
+    if(_maxfee > _incurredFeeAddTicket){
+       emit CaptureUserLiquidationBalance(balanceOf(user),_maxfee.sub(_incurredFeeAddTicket),0);
+       return balanceOf(user).add(_maxfee.sub(_incurredFeeAddTicket));
+    }else{ 
+       totalCompensation = totalCompensation.add(_incurredFeeAddTicket.sub(_maxfee));
+       emit CaptureUserLiquidationBalance(balanceOf(user),0,_incurredFeeAddTicket.sub(_maxfee));
+       return balanceOf(user);
+    } 
+  }
+  
+   /// @notice Update user cleared data
+  function liquidationBalanceComplete(address user) override external{
+    accrueIncurred_fee();
+    reduceAddTicketComplete(user,0);
+  }
   
   /// @notice Captures any available incurred_fee as award balance.
-  function captureAwardBalance(uint256 awardBalance) external onlyController override returns (uint256){
+  function captureAwardBalance(uint256 awardBalance) external override returns (uint256){
     accrueIncurred_fee();
     uint256 _awardBalance;
     if(totalsAddTicketsMaxfee > awardBalance){

@@ -20,6 +20,7 @@ contract ReduceTicket is Ownable, ReduceTicketInterface{
 
     using SafeMath for uint256;
     uint256 internal constant FULL = 1e18;
+    uint256 public maxReduceTicketReward;
 
     EarlyExitFeeInterface public earlyExitFeeInterface;
 
@@ -39,6 +40,10 @@ contract ReduceTicket is Ownable, ReduceTicketInterface{
 
     mapping(address => Market) public markets;
 
+    constructor(uint256 _maxReduceTicketReward) public{
+       maxReduceTicketReward = _maxReduceTicketReward;
+    }
+
     /**
      * @notice Add measure to be included in account liquidity calculation
      */
@@ -52,6 +57,9 @@ contract ReduceTicket is Ownable, ReduceTicketInterface{
     }
 
     function setReduceTicketReward(address _measure,uint256 _reduceTicketReward) external onlyOwner(){
+        if(_reduceTicketReward > maxReduceTicketReward){
+            _reduceTicketReward = maxReduceTicketReward;
+        }
         markets[_measure].reduceTicketReward = _reduceTicketReward;
     }
 

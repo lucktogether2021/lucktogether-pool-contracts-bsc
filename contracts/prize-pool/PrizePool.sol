@@ -19,6 +19,7 @@ import "../token/TicketInterface.sol";
 import "../token/TokenControllerInterface.sol";
 import "../utils/MappedSinglyLinkedList.sol";
 import "./PrizePoolInterface.sol";
+import "./Liquidation.sol";
 import "./EarlyExitFee.sol";
 
 /// @title Escrows assets and deposits them into a yield source.  Exposes incurred_fee to Prize Strategy.  Users deposit and withdraw from this contract to participate in Prize Pool.
@@ -49,6 +50,10 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   event AwardCaptured(
     address indexed token,
     uint256 amount
+  );
+
+  event Balance(
+    uint256 balance
   );
 
   /// @dev Event emitted when assets are deposited
@@ -100,6 +105,9 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
   /// @dev Event emitted when assets are withdrawn instantly
   event InstantWithdrawal(
+    address indexed operator,
+    address indexed from,
+    address indexed token,
     uint256 amount,
     uint256 redeemed,
     uint256 redeemedMaxfee,
@@ -151,6 +159,8 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
   EarlyExitFee public earlyExitFee;
 
+  Liquidation public liquidationInterface;
+
   /// @dev The total funds that have been allocated to the reserve
   uint256 public reserveTotalSupply;
 
@@ -166,14 +176,15 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
   /// @dev The unlock timestamps for each user
   mapping(address => uint256) internal _unlockTimestamps;
-  mapping(address => uint256) public principalMap;
 
   YieldSource[] public yieldSourceArray;
 
   /// @notice Initializes the Prize Pool
   constructor (
     RegistryInterface _reserveRegistry,
+    Liquidation _liquidationInterface,
     YieldSource[] memory _yieldSourceArray
+
   )
     public
   {
@@ -181,6 +192,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     _setLiquidityCap(uint256(-1));
 
     reserveRegistry = _reserveRegistry;
+    liquidationInterface = _liquidationInterface;
     yieldSourceArray = _yieldSourceArray;
 
     emit Initialized(
@@ -200,11 +212,12 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
   /// @dev Returns the total underlying balance of all assets. This includes both principal and incurred_fee.
   /// @return The underlying balance of assets
-  function balance() public hasYieldSource returns (uint256) {
+  function balance() public hasYieldSource override returns (uint256) {
     uint256 _balance = 0;
     for (uint256 i = 0; i < yieldSourceArray.length;i++) {
       _balance = yieldSourceArray[i].balance().add(_balance);
     }
+    emit Balance(_balance);
     return _balance;
   }
 
@@ -244,7 +257,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
       (best, _tempAmount) = _prioritySupplyYieldSource(amount);
       (bool success, ) = address(best).delegatecall(abi.encodeWithSignature("supply(uint256,address)", _tempAmount, best.cToken()));
       require(success, "PrizePool/supply-call-error");
-      principalMap[address(best)] = principalMap[address(best)].add(_tempAmount);
       amount = amount.sub(_tempAmount);
     }
   }
@@ -252,7 +264,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   function pureSupply(uint256 _amount, YieldSource _yieldSource) external onlyOwner {
     require(_yieldSource.availableQuota() >= _amount, "PrizePool/not-enough-quota");
     (bool success, ) = address(_yieldSource).delegatecall(abi.encodeWithSignature("supply(uint256,address)", _amount, _yieldSource.cToken()));
-    principalMap[address(_yieldSource)] = principalMap[address(_yieldSource)].add(_amount);
     require(success, "PrizePool/pure-supply-call-error");
   }
 
@@ -281,7 +292,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
       (best, _tempAmount) = _priorityRedeemYieldSource(amount);
       (bool success, bytes memory _diff) = address(best).delegatecall(abi.encodeWithSignature("redeem(uint256,address)", _tempAmount, best.cToken()));
       require(success, "PrizePool/redeem-call-error");
-      principalMap[address(best)] = principalMap[address(best)].sub(_tempAmount);
       diff = diff.add(bytesToUint(_diff));
       amount = amount.sub(_tempAmount);
     }
@@ -292,7 +302,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     require(_yieldSource.balance() >= _amount, "PrizePool/not-enough-balance");
     (bool success, bytes memory _diff) = address(_yieldSource).delegatecall(abi.encodeWithSignature("redeem(uint256,address)", _amount, _yieldSource.cToken()));
     require(success, "PrizePool/pure-redeem-call-error");
-    principalMap[address(_yieldSource)] = principalMap[address(_yieldSource)].sub(_amount);
     return bytesToUint(_diff);
   }
           
@@ -351,39 +360,30 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     emit ChangeAddTicket(operator,controlledToken,addMaxfeeAmount,allExtraTicketAmount);
   }
 
-  /// @notice liquidation
-  /// @param controlledToken The address to redeem tokens from.
-  /// @param users The array of user
-  function liquidation(address controlledToken,address flatAddress,address[] calldata users)
-    external override
-    onlyOwner
-    onlyControlledToken(controlledToken){
-    require(!_isControlled(flatAddress) && flatAddress != address(token()),"PrizePool/error flatAddress");
-    uint256 tokenTotalSupply = _tokenTotalSupply();
-    uint256 currentBalance = balance();
-    for(uint256 i = 0; i < users.length; i++){
-       address user = users[i];
-       uint256 userBalance = IERC20(controlledToken).balanceOf(user);
-       if (userBalance <= 0) {
-         continue;
-       }
-       uint256 balanceMantissa = FixedPoint.calculateMantissa(userBalance, tokenTotalSupply);
-       
-       uint256 amount = FixedPoint.multiplyUintByMantissa(currentBalance, balanceMantissa);
-           (, uint256 burnedCredit) = earlyExitFee.calculateEarlyExitFeeLessBurnedCredit(user, controlledToken, userBalance);
-       // burn the credit
-       earlyExitFee.burnCredit(user, controlledToken, burnedCredit);
-       // burn the tickets
-       ControlledToken(controlledToken).controllerBurnFrom(user, user, userBalance);
-       uint256 redeemed = _redeem(userBalance.add(amount.sub(userBalance)));
-       IERC20(token()).safeTransfer(user, redeemed);
-       uint256 _tbalance = IERC20(flatAddress).balanceOf(address(this));
-       if(_tbalance > 0){
-         amount = FixedPoint.multiplyUintByMantissa(_tbalance,balanceMantissa);
-         IERC20(flatAddress).transferFrom(address(this), user, amount);
-       }
-    }
+  function liquidationUser(address controlledToken,address user
+  ,uint256 userBalance,uint256 burnedCredit,uint256 redeemedAmount) override external onlyControlledToken(controlledToken) onlyLiquidation{
+    // burn the credit
+    earlyExitFee.burnCredit(user, controlledToken, burnedCredit);
+    // burn the tickets
+    ControlledToken(controlledToken).controllerBurnFrom(user, user, userBalance);
     
+    uint256 currentBalance = balance();
+    if(redeemedAmount > currentBalance){
+      redeemedAmount = currentBalance;
+    }
+    uint256 redeemed = _redeem(redeemedAmount);
+    IERC20(token()).safeTransfer(user, redeemed);
+
+    TicketInterface(controlledToken).liquidationBalanceComplete(user);
+    if(IERC20(controlledToken).totalSupply() == 0){
+      TicketInterface(controlledToken).captureAwardBalanceComplete();
+    }
+
+  }
+
+  function liquidationErc20(address erc20,address to,uint256 erc20Amount) override external onlyLiquidation{
+     require(!_isControlled(erc20) && erc20 != address(token()),"PrizePool/error erc20Address");
+     IERC20(erc20).safeTransfer(to, erc20Amount);
   }
 
   /// @notice Reduce the number of extra ticket for user
@@ -430,7 +430,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
     uint256 redeemed = _redeem(amountLessFee);
     IERC20(token()).safeTransfer(from, redeemed);
-    emit InstantWithdrawal(amount, redeemed,redeeMaxfee,exitFee);
+    emit InstantWithdrawal(_msgSender(),from,controlledToken,amount, redeemed,redeeMaxfee,exitFee);
     return exitFee;
   }
 
@@ -734,7 +734,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   function setEarlyExitFee(EarlyExitFee _earlyExitFee) external onlyOwner {
     require(address(_earlyExitFee) != address(0), "PrizePool/EarlyExitFee-not-zero");
     earlyExitFee = _earlyExitFee;
-
     emit EarlyExitFeeSet(address(_earlyExitFee));
   }
 
@@ -752,6 +751,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     }
     return FixedPoint.multiplyUintByMantissa(amount, reserveRateMantissa);
   }
+
   function upDataSortitionSumTrees(address _ticket,address _address,uint256 _amount) external override onlyPrizeStrategy{
     TicketInterface(_ticket).upDataSortitionSumTrees(_address,_amount);
   }
@@ -811,6 +811,12 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   /// @dev Function modifier to ensure caller is the prize-strategy
   modifier onlyPrizeStrategy() {
     require(_msgSender() == address(prizeStrategy), "PrizePool/only-prizeStrategy");
+    _;
+  }
+
+    /// @dev Function modifier to ensure caller is the prize-strategy
+  modifier onlyLiquidation() {
+    require(_msgSender() == address(liquidationInterface), "PrizePool/only-Liquidation");
     _;
   }
 

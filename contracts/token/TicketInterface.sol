@@ -42,4 +42,9 @@ interface TicketInterface is IERC20 {
 
   function getAllShares() external view returns (uint256);
   function getUserAssets(address user) external view returns (uint256);
+
+   /// @notice Calculates the user's balance at the time of liquidation.
+  function captureUserLiquidationBalance(address user) external returns(uint256);
+
+  function liquidationBalanceComplete(address user) external;
 }

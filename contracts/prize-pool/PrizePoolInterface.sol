@@ -24,14 +24,11 @@ interface PrizePoolInterface {
   )
     external;
 
+  function liquidationUser(address controlledToken,address user
+  ,uint256 userBalance,uint256 burnedCredit,uint256 redeemedAmount) external;  
 
-  function liquidation(
-    address controlledToken,
-    address flatAddress,
-    address[] calldata users
-  )
-    external;
-
+  function liquidationErc20(address erc20,address to,uint256 erc20Amount) external;  
+ 
   /// @notice Withdraw assets from the Prize Pool instantly.  A fairness fee may be charged for an early exit.
   /// @param from The address to redeem tokens from.
   /// @param amount The amount of tokens to redeem for assets.
@@ -51,6 +48,7 @@ interface PrizePoolInterface {
   /// @dev captureAwardBalance() should be called first
   /// @return The total amount of assets to be awarded for the current prize
   function awardBalance() external view returns (uint256);
+  function balance() external returns (uint256);
 
   /// @notice Captures any available incurred_fee as award balance.
   /// @dev This function also captures the reserve fees.
