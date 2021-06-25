@@ -74,7 +74,7 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   event AddTicket(address addTicketer,uint256 principal,uint256 addTicketAmount,uint256 maxfee);
 
   /// @dev Emitted when Reddem
-  event Reddem(uint256 _redeemTokens,uint256 _redeemAddTicketAmount,uint256 _redeemBmaxfee,bool isReddemAll);
+  event Reddem(uint256 redeemTokens,uint256 redeemAddTicketAmount,uint256 incurredFeeAddTicket,uint256 redeemMaxfee,uint256 exitFee,uint256 burnMaxfee);
 
   /// @dev Emitted Burn the user's maxfee
   event ExitFeeBurnMaxfee(uint256 burnMaxfee);
@@ -104,7 +104,13 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
     uint256 originalAwardBalance,
     uint256 awardBalance,  
     uint256 totalsAddTicketsMaxfee,
-    uint256 totalAddTicketsIncurred_fee,
+    uint256 totalAddTicketsIncurredFee,
+    uint256 totalCompensation
+  );
+
+  event CaptureAwardBalanceComplete(
+    uint256 totalsAddTicketsMaxfee,
+    uint256 totalAddTicketsIncurredFee,
     uint256 totalCompensation
   );
   
@@ -330,15 +336,19 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
     }
 
     (uint256 _exitFee,uint256 _burnMaxfee) = redeemCalculateBurnMaxfee(_redeemTokens,_redeemAddTicketAmount,exitFee);
-    if(_burnMaxfee > 0){
-      if(isReddemAll){
-        _redeemMaxfee = _maxfee.sub(_burnMaxfee);
-      }else{
-        exitFeeBurnMaxfee(_from, _burnMaxfee);
-      }
+    
+    if(isReddemAll){
+      _redeemMaxfee = _maxfee.sub(_burnMaxfee);
+    }else{
+      exitFeeBurnMaxfee(_from, _burnMaxfee);
     }
+    addTotalAddTicketsIncurredFee(_burnMaxfee);
+
+    upDataSubTotalsAddTicketsMaxfee(_redeemMaxfee);
     // redeem the tickets less the fee
     uint256 amountLessFee = _amount.sub(_exitFee).add(_redeemMaxfee);
+
+    emit Reddem(_redeemTokens,_redeemAddTicketAmount,accountAddTickets[_from].incurred_feeAddTicket,_redeemMaxfee,_exitFee,_burnMaxfee);
     return (amountLessFee,_redeemMaxfee,exitFee,burnedCredit);
   }
 
@@ -368,7 +378,7 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
       uint256 _originalBalance = balanceOf(redeemAddress);
       uint256 _balance = _originalBalance.sub(redeemTokens);
       if(accountAddTickets[redeemAddress].addTicketAmount == 0){
-         emit Reddem(redeemTokens,0,0,_balance == 0);
+         emit Reddem(redeemTokens,0,0,0,0,0);
          return (redeemTokens,0,0,_balance == 0);
       }
       fresh(redeemAddress,0,0,false);
@@ -403,7 +413,6 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
 
       }
      _redeemTokens = redeemTokens; 
-     emit Reddem(_redeemTokens,_redeemAddTicketAmount,_redeemMaxfee,_balance == 0);
      return (_redeemTokens,_redeemAddTicketAmount,_redeemMaxfee,_balance == 0);
 }
   
@@ -414,6 +423,7 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   */
   function redeemMoreThanRiskInternal(address _redeem) internal returns( uint256 _redeemMaxfee){
           uint256 exitFee = ReduceTicketInterface(reduceTicket).getExitFee(address(this), _redeem, 0, accountAddTickets[_redeem].addTicketAmount);
+          addTotalAddTicketsIncurredFee(exitFee);
           uint256 _payAmount = accountAddTickets[_redeem].incurred_feeAddTicket.add(exitFee).add(reduceTicketCalculateSeizeTokens(_redeem));
           uint256 compensationTokens = 0;
           if(accountAddTickets[_redeem].maxfee > _payAmount){
@@ -421,7 +431,7 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
           }else{
              compensationTokens = _payAmount.sub(accountAddTickets[_redeem].maxfee);
           }
-          reduceTicketComplete(_redeem,compensationTokens);
+          reduceTicketComplete(_redeem,0,compensationTokens);
           return _redeemMaxfee;
   
   }
@@ -432,9 +442,7 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   */
   function redeemComplete(address _redeem,uint256 _redeemAddTicketAmount,bool isReddemAll) internal{
     if(isReddemAll){
-        totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(accountAddTickets[_redeem].maxfee);
         totalAddTickets = totalAddTickets.sub(accountAddTickets[_redeem].addTicketAmount);
-
         accountAddTickets[_redeem].addTicketAmount = 0;
         accountAddTickets[_redeem].incurred_feeAddTicket = 0;
         accountAddTickets[_redeem].maxfee = 0;
@@ -460,7 +468,6 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   function exitFeeBurnMaxfee(address account,uint256 _burnAmount) internal {
       if(_burnAmount != 0){
         uint256 _remainingMaxfee = accountAddTickets[account].maxfee.sub(_burnAmount);
-        totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(_burnAmount);
         uint256 _addTicketAmount = accountAddTickets[account].addTicketAmount;
         uint256 _incurred_feeAddTicket = accountAddTickets[account].incurred_feeAddTicket;
         uint256 _riskValue = FixedPoint.multiplyUintByMantissa(ReduceTicketInterface(reduceTicket).calculateCurrentRiskValue(address(this),
@@ -470,6 +477,23 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
         accountAddTickets[account].maxfee = _remainingMaxfee;
       }
       emit ExitFeeBurnMaxfee(_burnAmount);
+  }
+
+
+  function addTotalAddTicketsIncurredFee(uint256 amount) internal{
+      totalAddTicketsIncurred_fee = totalAddTicketsIncurred_fee.add(amount);
+  }
+
+  function upDataSubTotalsAddTicketsMaxfee(uint256 amount) internal{
+      if(totalsAddTicketsMaxfee >= amount){
+           totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(amount);
+      }else{
+        if(totalsAddTicketsMaxfee != 0){
+           totalsAddTicketsMaxfee = 0;
+        }
+       
+      }
+
   }
 
   /**
@@ -509,6 +533,7 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
         (exitFee, burnedCredit) =  ReduceTicketInterface(reduceTicket).calculateEarlyExitFee(addTicketer, address(this), reduceAddTicketAmount);
         changeAddTicketComplete(addTicketer,addMaxfeeAmount,allAddTicketAmount);
         exitFeeBurnMaxfee(addTicketer, exitFee);
+        addTotalAddTicketsIncurredFee(exitFee);
       }else{
         changeAddTicketComplete(addTicketer,addMaxfeeAmount,allAddTicketAmount);
      }
@@ -545,19 +570,20 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
     (uint256 addTicketAmount,uint256 _incurred_feeAddTicket,,uint256 _maxfee) = TicketInterface(address(this)).accountAddTickets(from);
     uint256 _seizeToken = reduceTicketCalculateSeizeTokens(from); 
     (uint256 exitFee, uint256 burnedCredit) = ReduceTicketInterface(reduceTicket).calculateEarlyExitFee(from, address(this), addTicketAmount);
-    uint256 _payAmount = _seizeToken.add(_incurred_feeAddTicket).add(exitFee);  
+    uint256 _payAmount = _seizeToken.add(_incurred_feeAddTicket).add(exitFee);
+    addTotalAddTicketsIncurredFee(exitFee);
     uint256 seizeToken;
     uint256 remainingMaxfee;
     if(_maxfee >= _payAmount){
        seizeToken = _seizeToken;
        remainingMaxfee = _maxfee.sub(_payAmount);
-       reduceAddTicketComplete(from,0);
+       reduceAddTicketComplete(from,remainingMaxfee.add(_seizeToken),0);
 
     }else{
       if(_maxfee > _seizeToken){
         seizeToken = _seizeToken;
       }
-      reduceAddTicketComplete(from,_payAmount.sub(_maxfee));
+      reduceAddTicketComplete(from,seizeToken,_payAmount.sub(_maxfee));
     }
     return (seizeToken,remainingMaxfee,exitFee,burnedCredit);
 
@@ -583,8 +609,8 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   * @param compensationTokens The addTicketer's compensation amount
   *
   */
-  function reduceAddTicketComplete(address addTicketer,uint256 compensationTokens) internal {
-     reduceTicketComplete(addTicketer,compensationTokens);
+  function reduceAddTicketComplete(address addTicketer,uint256 remainingMaxfee,uint256 compensationTokens) internal {
+     reduceTicketComplete(addTicketer,remainingMaxfee,compensationTokens);
 
      uint256 balance = balanceOf(addTicketer);
      sortitionSumTrees.set(TREE_KEY, balance, bytes32(uint256(addTicketer)));
@@ -598,9 +624,10 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   * @param  compensationTokens The addTicketer's compensation amount
   *
   */
-  function reduceTicketComplete(address addTicketer,uint256 compensationTokens) internal{
+  function reduceTicketComplete(address addTicketer,uint256 remainingMaxfee,uint256 compensationTokens) internal{
     AddTicketSnapshot memory addTicketSnapshot = accountAddTickets[addTicketer];
-    totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(addTicketSnapshot.maxfee);
+    upDataSubTotalsAddTicketsMaxfee(remainingMaxfee);
+    
     totalAddTickets = totalAddTickets.sub(addTicketSnapshot.addTicketAmount);
     
     accountAddTickets[addTicketer] = AddTicketSnapshot({
@@ -668,7 +695,7 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
    /// @notice Update user cleared data
   function liquidationBalanceComplete(address user) override external{
     accrueIncurred_fee();
-    reduceAddTicketComplete(user,0);
+    reduceAddTicketComplete(user,accountAddTickets[user].maxfee.sub(accountAddTickets[user].incurred_feeAddTicket),0);
   }
   
   /// @notice Captures any available incurred_fee as award balance.
@@ -692,6 +719,19 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   
   /// @notice Clear the reward data.
   function captureAwardBalanceComplete() external override onlyController(){
+    if(totalsAddTicketsMaxfee < totalAddTicketsIncurred_fee){
+      totalsAddTicketsMaxfee = 0;
+    }else{
+      totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(totalAddTicketsIncurred_fee);
+    }
+    totalAddTicketsIncurred_fee = 0;
+    totalCompensation = 0;
+
+    emit CaptureAwardBalanceComplete(totalsAddTicketsMaxfee,totalAddTicketsIncurred_fee,totalCompensation);
+  }
+
+  function liquidationComplete() external override onlyController(){
+    totalsAddTicketsMaxfee = 0;
     totalAddTicketsIncurred_fee = 0;
     totalCompensation = 0;
   }

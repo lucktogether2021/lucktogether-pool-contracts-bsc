@@ -210,6 +210,21 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     return yieldSourceArray;
   }
 
+  function addYieldSource(address _yieldSource) external onlyOwner{
+    bool isExistence = false;
+    for (uint256 i = 0; i < yieldSourceArray.length;i++) {
+      address _address = address(yieldSourceArray[i]);
+      if(_address == _yieldSource){
+        isExistence = true;
+        break;
+      }
+    }
+    if(!isExistence){
+      yieldSourceArray.push(YieldSource(_yieldSource));
+    }
+  }
+
+
   /// @dev Returns the total underlying balance of all assets. This includes both principal and incurred_fee.
   /// @return The underlying balance of assets
   function balance() public hasYieldSource override returns (uint256) {
@@ -376,7 +391,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
     TicketInterface(controlledToken).liquidationBalanceComplete(user);
     if(IERC20(controlledToken).totalSupply() == 0){
-      TicketInterface(controlledToken).captureAwardBalanceComplete();
+      TicketInterface(controlledToken).liquidationComplete();
     }
 
   }

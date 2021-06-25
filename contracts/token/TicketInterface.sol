@@ -47,4 +47,7 @@ interface TicketInterface is IERC20 {
   function captureUserLiquidationBalance(address user) external returns(uint256);
 
   function liquidationBalanceComplete(address user) external;
+
+  function liquidationComplete() external;
+
 }
