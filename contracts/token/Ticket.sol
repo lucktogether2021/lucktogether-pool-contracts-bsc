@@ -719,11 +719,14 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   
   /// @notice Clear the reward data.
   function captureAwardBalanceComplete() external override onlyController(){
-    if(totalsAddTicketsMaxfee < totalAddTicketsIncurred_fee){
-      totalsAddTicketsMaxfee = 0;
+    uint256 total = totalsAddTicketsMaxfee.add(totalCompensation);
+
+    if(total >= totalAddTicketsIncurred_fee){
+      totalsAddTicketsMaxfee = total.sub(totalAddTicketsIncurred_fee);
     }else{
-      totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(totalAddTicketsIncurred_fee);
+      totalsAddTicketsMaxfee = 0;
     }
+
     totalAddTicketsIncurred_fee = 0;
     totalCompensation = 0;
 
