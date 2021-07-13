@@ -83,6 +83,9 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
 
   event ChangeAddTicket(uint256 allAddTicketAmount,uint256 addMaxfeeAmount,uint256 currrentMaxfee);
 
+  event SetAddTicketRateMantissa(uint256 _addTicketRateMantissa);
+  event SetReduceTicket(address _reduceTicket);
+
   /// @dev Emitted when ReduceTicket AddTicket
   event ReduceTicketAddTicketFresh(
     address controlledToken,
@@ -134,10 +137,12 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   function setAddTicketRateMantissa(uint256 _addTicketRateMantissa) external onlyOwner(){
     accrueIncurred_fee();
     addTicketRateMantissa = _addTicketRateMantissa;
+    emit SetAddTicketRateMantissa(addTicketRateMantissa);
   }
 
   function setReduceTicket(address _reduceTicket) external onlyOwner() {
     reduceTicket = _reduceTicket;
+    emit SetReduceTicket(_reduceTicket);
   }
 
   /// @notice Returns the user's chance of winning.
@@ -719,18 +724,12 @@ function redeemInternal(address redeemAddress,uint256 redeemTokens) internal ret
   
   /// @notice Clear the reward data.
   function captureAwardBalanceComplete() external override onlyController(){
-    uint256 realIncurredFee;
-    if(totalAddTicketsIncurred_fee > totalCompensation){
-      realIncurredFee = totalAddTicketsIncurred_fee.sub(totalCompensation);
-    }else{
-      realIncurredFee = totalAddTicketsIncurred_fee;
-    }
+    uint256 total = totalsAddTicketsMaxfee.add(totalCompensation);
 
-    if(totalsAddTicketsMaxfee < realIncurredFee){
-      totalsAddTicketsMaxfee = 0;
+    if(total >= totalAddTicketsIncurred_fee){
+      totalsAddTicketsMaxfee = total.sub(totalAddTicketsIncurred_fee);
     }else{
-      totalsAddTicketsMaxfee = totalsAddTicketsMaxfee.sub(realIncurredFee);
-     
+      totalsAddTicketsMaxfee = 0;
     }
 
     totalAddTicketsIncurred_fee = 0;

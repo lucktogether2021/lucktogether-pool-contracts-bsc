@@ -15,12 +15,14 @@ contract StakePrizePool is YieldSource,Ownable {
     event StakePrizePoolInitialized(address indexed token);
     event Claim(address _address);
     event Transfer(uint256 amount);
+    event SetPriority(uint256 _v);
     
     IERC20 override public token;
     uint256 internal _priority = 1;
     uint256 internal _availableQuota = uint256(-1);
     
     constructor(IERC20 _token) public {
+        require(address(_token) != address(0), "StakePrizePool/token-not-zero");
         token = _token;
         emit StakePrizePoolInitialized(address(token));
     }
@@ -57,6 +59,7 @@ contract StakePrizePool is YieldSource,Ownable {
 
     function setPriority(uint256 _v) external onlyOwner returns (bool){
         _priority = _v;
+        emit SetPriority(_v);
         return true;
     }
 

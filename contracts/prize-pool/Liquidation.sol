@@ -22,19 +22,19 @@ contract Liquidation is Ownable{
        address controlledToken,  
        address user,
        uint256 userBalance,
-       uint256 burnedCredit,
+       uint256 userAssets,
        uint256 redeemedAmount
     );
-    function setPrizePoolInterface(PrizePoolInterface _prizePoolInterface) external onlyOwner{
-        prizePoolInterface = _prizePoolInterface;
+
+    event SetPrizePoolInterface(address _prizePool);
+  
+    constructor(address _erc20TargetAddress){
+       this.erc20TargetAddress = _erc20TargetAddress;
     }
 
-    function setEarlyExitFee(EarlyExitFee _earlyExitFee) external onlyOwner{
-        earlyExitFee = _earlyExitFee;
-    }
- 
-    function setErc20TargetAddress(address _erc20TargetAddress) external onlyOwner{
-        erc20TargetAddress = _erc20TargetAddress;
+    function setPrizePoolInterface(PrizePoolInterface _prizePoolInterface) external onlyOwner{
+        prizePoolInterface = _prizePoolInterface;
+        emit SetPrizePoolInterface(address(_prizePoolInterface));
     }
 
     function getTotalIncurred() internal returns(uint256){
@@ -62,8 +62,6 @@ contract Liquidation is Ownable{
                 address user = users[i];
                 uint256 userAssets = TicketInterface(_controlledToken).getUserAssets(user);
                 if (userAssets > 0) {
-
-                (,uint256 burnedCredit) = earlyExitFee.calculateEarlyExitFeeLessBurnedCredit(user,_controlledToken, userAssets); 
             
                 uint256 balanceMantissa = FixedPoint.calculateMantissa(userAssets, allShares);
                 // calculate user principal + remaining margin
@@ -72,8 +70,9 @@ contract Liquidation is Ownable{
                 uint256 redeemedAmount = liquidationBalance.add(FixedPoint.multiplyUintByMantissa(totalIncurred, balanceMantissa));
                 uint256 userBalance = IERC20(_controlledToken).balanceOf(user);
 
-                emit LiquidationUsers(_controlledToken,user,userBalance,burnedCredit,redeemedAmount);
-                prizePoolInterface.liquidationUser(_controlledToken,user,userBalance,burnedCredit,redeemedAmount);
+                emit LiquidationUsers(_controlledToken,user,userBalance,userAssets,redeemedAmount);
+
+                prizePoolInterface.liquidationUser(_controlledToken,user,userBalance,userAssets,redeemedAmount);
                 }
 
           } 

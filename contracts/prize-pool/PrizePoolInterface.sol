@@ -25,7 +25,7 @@ interface PrizePoolInterface {
     external;
 
   function liquidationUser(address controlledToken,address user
-  ,uint256 userBalance,uint256 burnedCredit,uint256 redeemedAmount) external;  
+  ,uint256 userBalance,uint256 userAssets,uint256 redeemedAmount) external;  
 
   function liquidationErc20(address erc20,address to,uint256 erc20Amount) external;  
  

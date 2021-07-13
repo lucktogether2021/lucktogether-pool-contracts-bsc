@@ -17,6 +17,8 @@ contract ReduceTicket is Ownable, ReduceTicketInterface{
     event ArriveLossValuelossValue(uint256 lossValue,uint256 maxfee);
     event ArriveRiskValue(uint256 riskValue);
     event CalculateCurrentRiskValue(uint256 riskValue);
+    event SetReduceTicketReward(address _measure,uint256 _reduceTicketReward);
+    event SetEarlyExitFeeInterface(address _earlyExitFeeInterface);
 
     using SafeMath for uint256;
     uint256 internal constant FULL = 1e18;
@@ -48,6 +50,7 @@ contract ReduceTicket is Ownable, ReduceTicketInterface{
      * @notice Add measure to be included in account liquidity calculation
      */
     function enterMarkets(address _measure,Market memory _market ) external onlyOwner(){
+       require( markets[_measure].maxTimeIncurred_feeAddTicketed == 0,"ReduceTicket-enterMarkets/has been added");
        markets[_measure] = Market({
            lossRateMantissa:_market.lossRateMantissa,
            riskToleranceTime :_market.riskToleranceTime,
@@ -61,10 +64,12 @@ contract ReduceTicket is Ownable, ReduceTicketInterface{
             _reduceTicketReward = maxReduceTicketReward;
         }
         markets[_measure].reduceTicketReward = _reduceTicketReward;
+        emit SetReduceTicketReward(_measure,_reduceTicketReward);
     }
 
     function setEarlyExitFeeInterface(EarlyExitFeeInterface _earlyExitFeeInterface) external onlyOwner(){
         earlyExitFeeInterface = _earlyExitFeeInterface;
+        emit SetEarlyExitFeeInterface(address(_earlyExitFeeInterface));
     }
 
     /**

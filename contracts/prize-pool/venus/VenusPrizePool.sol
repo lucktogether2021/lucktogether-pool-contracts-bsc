@@ -15,6 +15,9 @@ contract VenusPrizePool is YieldSource,Ownable {
     event VenesPrizePoolInitialized(address indexed c);
     event Claim(address _address);
     event Transfer(uint256 amount);
+
+    event SetPriority(uint256 _v);
+    event SetAvailableQuota(uint256 _v);
     
     CTokenInterface public cTokenObject;
     uint256 internal _priority = 1;
@@ -71,6 +74,7 @@ contract VenusPrizePool is YieldSource,Ownable {
 
     function setPriority(uint256 _v) external onlyOwner returns (bool){
         _priority = _v;
+        emit SetPriority(_v);
         return true;
     }
 
@@ -84,6 +88,7 @@ contract VenusPrizePool is YieldSource,Ownable {
 
     function setAvailableQuota(uint256 _v) external onlyOwner returns (bool){
         _availableQuota = _v;
+        emit SetAvailableQuota(_v);
         return true;
     }
 }

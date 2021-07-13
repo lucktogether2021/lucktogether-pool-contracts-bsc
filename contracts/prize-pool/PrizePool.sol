@@ -188,8 +188,10 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   )
     public
   {
-    require(address(_reserveRegistry) != address(0), "PrizePool/reserveRegistry-not-zero");
     _setLiquidityCap(uint256(-1));
+
+    require(address(_reserveRegistry) != address(0), "PrizePool/reserveRegistry-not-zero");
+    require(address(_liquidationInterface) != address(0), "PrizePool/liquidationInterface-not-zero");
 
     reserveRegistry = _reserveRegistry;
     liquidationInterface = _liquidationInterface;
@@ -361,7 +363,9 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   }
 
   function liquidationUser(address controlledToken,address user
-  ,uint256 userBalance,uint256 burnedCredit,uint256 redeemedAmount) override external onlyControlledToken(controlledToken) onlyLiquidation{
+  ,uint256 userBalance,uint256 userAssets,uint256 redeemedAmount) override external onlyControlledToken(controlledToken) onlyLiquidation{
+
+    (,uint256 burnedCredit) = earlyExitFee.calculateEarlyExitFeeLessBurnedCredit(user,controlledToken, userAssets); 
     // burn the credit
     earlyExitFee.burnCredit(user, controlledToken, burnedCredit);
     // burn the tickets
@@ -710,7 +714,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
   /// @notice Adds new controlled token, only can called once
   /// @param _controlledTokens Array of ControlledTokens that are controlled by this Prize Pool.
-  function addControlledToken(ControlledTokenInterface[] memory _controlledTokens) public {
+  function addControlledToken(ControlledTokenInterface[] memory _controlledTokens) public onlyOwner{
     _tokens.initialize();
     for (uint256 i = 0; i < _controlledTokens.length; i++) {
       require(_controlledTokens[i].controller() == this, "PrizePool/token-ctrlr-mismatch");
@@ -733,6 +737,7 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   /// @param _earlyExitFee early exit fee
   function setEarlyExitFee(EarlyExitFee _earlyExitFee) external onlyOwner {
     require(address(_earlyExitFee) != address(0), "PrizePool/EarlyExitFee-not-zero");
+    require(address(earlyExitFee) == address(0), "PrizePool/EarlyExitFee-have-been-set");
     earlyExitFee = _earlyExitFee;
     emit EarlyExitFeeSet(address(_earlyExitFee));
   }
