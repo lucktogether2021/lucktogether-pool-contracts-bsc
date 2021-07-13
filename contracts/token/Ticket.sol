@@ -137,7 +137,7 @@ contract Ticket is ControlledToken, TicketInterface, Ownable{
   function setAddTicketRateMantissa(uint256 _addTicketRateMantissa) external onlyOwner(){
     accrueIncurred_fee();
     addTicketRateMantissa = _addTicketRateMantissa;
-    emit SetAddTicketRateMantissa(addTicketRateMantissa);
+    emit SetAddTicketRateMantissa(_addTicketRateMantissa);
   }
 
   function setReduceTicket(address _reduceTicket) external onlyOwner() {
