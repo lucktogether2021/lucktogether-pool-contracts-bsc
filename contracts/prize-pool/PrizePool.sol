@@ -19,7 +19,6 @@ import "../token/TicketInterface.sol";
 import "../token/TokenControllerInterface.sol";
 import "../utils/MappedSinglyLinkedList.sol";
 import "./PrizePoolInterface.sol";
-import "./Liquidation.sol";
 import "./EarlyExitFee.sol";
 
 /// @title Escrows assets and deposits them into a yield source.  Exposes incurred_fee to Prize Strategy.  Users deposit and withdraw from this contract to participate in Prize Pool.
@@ -159,8 +158,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
 
   EarlyExitFee public earlyExitFee;
 
-  Liquidation public liquidationInterface;
-
   /// @dev The total funds that have been allocated to the reserve
   uint256 public reserveTotalSupply;
 
@@ -182,7 +179,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   /// @notice Initializes the Prize Pool
   constructor (
     RegistryInterface _reserveRegistry,
-    Liquidation _liquidationInterface,
     YieldSource[] memory _yieldSourceArray
 
   )
@@ -191,10 +187,8 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
     _setLiquidityCap(uint256(-1));
 
     require(address(_reserveRegistry) != address(0), "PrizePool/reserveRegistry-not-zero");
-    require(address(_liquidationInterface) != address(0), "PrizePool/liquidationInterface-not-zero");
 
     reserveRegistry = _reserveRegistry;
-    liquidationInterface = _liquidationInterface;
     yieldSourceArray = _yieldSourceArray;
 
     emit Initialized(
@@ -360,34 +354,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
       _supply(addMaxfeeAmount);
     }
     emit ChangeAddTicket(operator,controlledToken,addMaxfeeAmount,allExtraTicketAmount);
-  }
-
-  function liquidationUser(address controlledToken,address user
-  ,uint256 userBalance,uint256 userAssets,uint256 redeemedAmount) override external onlyControlledToken(controlledToken) onlyLiquidation{
-
-    (,uint256 burnedCredit) = earlyExitFee.calculateEarlyExitFeeLessBurnedCredit(user,controlledToken, userAssets); 
-    // burn the credit
-    earlyExitFee.burnCredit(user, controlledToken, burnedCredit);
-    // burn the tickets
-    ControlledToken(controlledToken).controllerBurnFrom(user, user, userBalance);
-    
-    uint256 currentBalance = balance();
-    if(redeemedAmount > currentBalance){
-      redeemedAmount = currentBalance;
-    }
-    uint256 redeemed = _redeem(redeemedAmount);
-    IERC20(token()).safeTransfer(user, redeemed);
-
-    TicketInterface(controlledToken).liquidationBalanceComplete(user);
-    if(IERC20(controlledToken).totalSupply() == 0){
-      TicketInterface(controlledToken).liquidationComplete();
-    }
-
-  }
-
-  function liquidationErc20(address erc20,address to,uint256 erc20Amount) override external onlyLiquidation{
-     require(!_isControlled(erc20) && erc20 != address(token()),"PrizePool/error erc20Address");
-     IERC20(erc20).safeTransfer(to, erc20Amount);
   }
 
   /// @notice Reduce the number of extra ticket for user
@@ -816,12 +782,6 @@ contract PrizePool is PrizePoolInterface, Ownable, ReentrancyGuard, TokenControl
   /// @dev Function modifier to ensure caller is the prize-strategy
   modifier onlyPrizeStrategy() {
     require(_msgSender() == address(prizeStrategy), "PrizePool/only-prizeStrategy");
-    _;
-  }
-
-    /// @dev Function modifier to ensure caller is the prize-strategy
-  modifier onlyLiquidation() {
-    require(_msgSender() == address(liquidationInterface), "PrizePool/only-Liquidation");
     _;
   }
 
